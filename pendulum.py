@@ -55,7 +55,7 @@ def smooth_barrier(x, limit=0.5, alpha=20.0):
     # softplus-like barrier
     return np.log(1 + np.exp(alpha * (np.abs(x) - limit))) / alpha
 
-def collocation_trajectory():
+def collocation_trajectory(animate=False):
 
     builder = DiagramBuilder()
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
@@ -83,21 +83,21 @@ def collocation_trajectory():
 
     dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
 
-    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] <= 20)
-    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] >= -20)
+    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 1)
+    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -1)
 
-    # ['sliding_pendulum_slider_joint_x', 'sliding_pendulum_shoulder_q', 'sliding_pendulum_elbow_q', 
-    #  'sliding_pendulum_slider_joint_v', 'sliding_pendulum_shoulder_w', 'sliding_pendulum_elbow_w']
+    print(np.column_stack((initial_state, final_state)))
 
-    # cost of actuation
-    dircol.AddRunningCost(1 * (dircol.input()[0])**2)
+    # Load the initial trajectory from the keyframe generation
+    data = np.load("./keyframes/swing_up_2.npz")
+    keyframes = data["keyframes"]
+    times = data["times"]
 
-    # cost of the second link rotating
-    dircol.AddRunningCost(2 * (dircol.state()[5])**2)
+    print("Keyframes:\n", keyframes.T)
+    print("Times:", times)
 
     initial_x_trajectory = PiecewisePolynomial.FirstOrderHold(
-            [0.0, 6.0],
-            np.column_stack((initial_state, final_state))
+            times, keyframes.T
     )
 
     dircol.SetInitialTrajectory(PiecewisePolynomial(), initial_x_trajectory)
@@ -124,27 +124,31 @@ def collocation_trajectory():
     print(x_trajectory.value(x_trajectory.end_time()))
 
     # animate it
-    MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
+    if animate:
 
-    diagram = builder.Build()
-    context = diagram.CreateDefaultContext()
-    plant_context = plant.GetMyContextFromRoot(context)
+        MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
-    t0 = x_trajectory.start_time()
-    tf = x_trajectory.end_time()
+        diagram = builder.Build()
+        context = diagram.CreateDefaultContext()
+        plant_context = plant.GetMyContextFromRoot(context)
 
-    dt = 0.01
+        t0 = x_trajectory.start_time()
+        tf = x_trajectory.end_time()
 
-    t = t0
-    while t <= tf:
-        x = x_trajectory.value(t).flatten()
+        dt = 0.01
 
-        plant.SetPositionsAndVelocities(plant_context, x)
+        t = t0
+        while t <= tf:
+            x = x_trajectory.value(t).flatten()
 
-        diagram.ForcedPublish(context)
+            plant.SetPositionsAndVelocities(plant_context, x)
 
-        time.sleep(dt)
-        t += dt
+            diagram.ForcedPublish(context)
+
+            time.sleep(dt)
+            t += dt
+    
+
 
 def lqr_double_swing_up():
     builder = DiagramBuilder()
@@ -440,7 +444,7 @@ def double_pendulum():
     simulator.AdvanceTo(10.0)
 
 # double_pendulum()
-lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=0.2, elbow_deviation=-0.2)
+# lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=0.2, elbow_deviation=-0.2)
 # lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=np.pi, shoulder_deviation=0.1, elbow_deviation=-0.1)
 # lqr_double_swing_up()
-# collocation_trajectory()
+collocation_trajectory()
