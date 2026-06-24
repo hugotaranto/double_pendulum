@@ -16,6 +16,8 @@ from pydrake.all import (
     DirectCollocation,
     PiecewisePolynomial,
     Solve,
+    FiniteHorizonLinearQuadraticRegulator,
+    FiniteHorizonLinearQuadraticRegulatorOptions,
 )
 
 import time
@@ -29,6 +31,67 @@ while meshcat.GetNumActiveConnections() == 0:
 time.sleep(1)
 
 print("Simulating...")
+
+class SelectorController(LeafSystem):
+    def __init__(self):
+        super().__init__()
+
+        self.mode = "swing_up"      # initialise with swing up mode
+
+        self.state_port = self.DeclareVectorInputPort(name="estimated_state", size=6)
+        self.swing_up = self.DeclareVectorInputPort(name="swing_up", size=1)
+        self.up_up_balance = self.DeclareVectorInputPort(name="up_up_balance", size=1)
+
+        self.DeclareVectorOutputPort(name="force",
+                                     size=1,
+                                     calc=self.CalcOutput)
+
+    def CalcOutput(self, context, output):
+
+        if self.mode == "swing_up":
+            x = self.state_port.Eval(context)
+
+            # check if the state is close to the balance point
+            if(
+                abs(abs(x[1]) - np.pi) < 0.1 and
+                abs(abs(x[2]) - 0.0) < 0.1 and
+                abs(x[4]) < 0.5 and
+                abs(x[5]) < 0.5):
+
+                self.mode = "balance"
+                print("Switching to balancing mode!")
+
+        if self.mode == "swing_up":
+            output.SetFromVector(self.swing_up.Eval(context))
+        else:
+            output.SetFromVector(self.up_up_balance.Eval(context))
+
+
+class TVLQRController(LeafSystem):
+    def __init__(self, K_traj, x_traj, u_traj):
+        super().__init__()
+
+        self.K_traj = K_traj
+        self.x_traj = x_traj
+        self.u_traj = u_traj
+
+        self.state_port = self.DeclareVectorInputPort(name="estimated_state", size=6)
+        self.start_time = self.DeclareVectorInputPort(name="start_time", size=1)
+        self.DeclareVectorOutputPort(name="force",
+                                       size=1,
+                                       calc=self.CalcOutput)
+
+    def CalcOutput(self, context, output):
+        t = context.get_time()
+
+        x = self.state_port.Eval(context)
+        x_des = self.x_traj.value(t).flatten()
+        u_des = self.u_traj.value(t)[0]
+        K = self.K_traj.value(t)
+
+        u = u_des - K @ (x - x_des)
+        output.SetFromVector(u)
+
 
 class LQRController(LeafSystem):
     def __init__(self, K):
@@ -148,7 +211,7 @@ def collocation_trajectory(animate=False):
             time.sleep(dt)
             t += dt
     
-
+    return x_trajectory, u_trajectory
 
 def lqr_double_swing_up():
     builder = DiagramBuilder()
@@ -296,7 +359,7 @@ def lqr_double_swing_up():
         time.sleep(dt)
         t += dt
 
-def lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=0.2, elbow_deviation=0.2):
+def lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=0.2, elbow_deviation=0.2, animate=False):
     builder = DiagramBuilder()
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
     parser = Parser(plant)
@@ -362,46 +425,49 @@ def lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=
             R
     )
 
-    # add the controller
-    lqr_controller = builder.AddNamedSystem("lqr_controller", LQRController(K))
+    if animate:
+        # add the controller
+        lqr_controller = builder.AddNamedSystem("lqr_controller", LQRController(K))
 
-    # connect the controller to the plant
-    builder.Connect(plant.get_state_output_port(),
-                    lqr_controller.state_port)
+        # connect the controller to the plant
+        builder.Connect(plant.get_state_output_port(),
+                        lqr_controller.state_port)
 
-    builder.Connect(lqr_controller.get_output_port(),
-                    plant.get_actuation_input_port())
+        builder.Connect(lqr_controller.get_output_port(),
+                        plant.get_actuation_input_port())
 
-    # set the desired state for the controller
-    desired_state = builder.AddSystem(ConstantVectorSource([0, shoulder_angle, elbow_angle, 0, 0, 0]))
-    builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
+        # set the desired state for the controller
+        desired_state = builder.AddSystem(ConstantVectorSource([0, shoulder_angle, elbow_angle, 0, 0, 0]))
+        builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
 
-    MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
+        MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
-    logger = LogVectorOutput(plant.get_state_output_port(), builder)
+        logger = LogVectorOutput(plant.get_state_output_port(), builder)
 
-    diagram = builder.Build()
-    simulator = Simulator(diagram)
+        diagram = builder.Build()
+        simulator = Simulator(diagram)
 
-    simulator.set_target_realtime_rate(1.0)
-    context = simulator.get_mutable_context()
+        simulator.set_target_realtime_rate(1.0)
+        context = simulator.get_mutable_context()
 
-    plant_context = plant.GetMyContextFromRoot(context)
+        plant_context = plant.GetMyContextFromRoot(context)
 
-    # set the initial positions
-    joint = plant.GetJointByName("shoulder")
-    joint.set_angle(plant_context, shoulder_angle - shoulder_deviation)
-    joint.set_angular_rate(plant_context, 0.0)
+        # set the initial positions
+        joint = plant.GetJointByName("shoulder")
+        joint.set_angle(plant_context, shoulder_angle - shoulder_deviation)
+        joint.set_angular_rate(plant_context, 0.0)
 
-    joint = plant.GetJointByName("elbow")
-    joint.set_angle(plant_context, elbow_angle + elbow_deviation)
-    joint.set_angular_rate(plant_context, 0.0)
+        joint = plant.GetJointByName("elbow")
+        joint.set_angle(plant_context, elbow_angle + elbow_deviation)
+        joint.set_angular_rate(plant_context, 0.0)
 
-    joint = plant.GetJointByName("slider_joint")
-    joint.set_translation(plant_context, 0.0)
-    joint.set_translation_rate(plant_context, 0.0)
+        joint = plant.GetJointByName("slider_joint")
+        joint.set_translation(plant_context, 0.0)
+        joint.set_translation_rate(plant_context, 0.0)
 
-    simulator.AdvanceTo(20.0)
+        simulator.AdvanceTo(20.0)
+
+    return K
 
 
 def double_pendulum():
@@ -443,8 +509,111 @@ def double_pendulum():
 
     simulator.AdvanceTo(10.0)
 
+def tvlqr(x_trajectory, u_trajectory, up_up_K):
+
+    builder = DiagramBuilder()
+    plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
+    parser = Parser(plant)
+    parser.AddModels("./sliding_double_pendulum.urdf")
+    plant.Finalize()
+
+    options = FiniteHorizonLinearQuadraticRegulatorOptions()
+    options.x0 = x_trajectory
+    options.u0 = u_trajectory
+    options.input_port_index = plant.get_actuation_input_port().get_index()
+
+    context = plant.CreateDefaultContext()
+
+    # define Q: the cost for each of the states
+    Q = np.diag([
+        10,      # slider position
+        100,    # angle of first link
+        100,    # angle of second link
+        1,      # velocity of slider
+        10,     # shoulder angular velocity
+        10,     # elbow angular velocity
+    ])
+
+    # define R: the cost of actuation
+    R = np.array([[1]])
+
+    t0 = x_trajectory.start_time()
+    tf = x_trajectory.end_time()
+
+    tvlqr = FiniteHorizonLinearQuadraticRegulator(
+            plant,
+            context,
+            t0,
+            tf,
+            Q,
+            R,
+            options
+    )
+
+    # add the selector controller
+    selector_controller = builder.AddNamedSystem("selector_controller", SelectorController())
+
+    # add the lqr controller
+    lqr_controller = builder.AddNamedSystem("lqr_controller", LQRController(up_up_K))
+
+    # add the tvlqr controller
+    tvlqr_controller = builder.AddNamedSystem("tvlqr_controller", 
+                                              TVLQRController(K_traj=tvlqr.K, x_traj=x_trajectory, u_traj=u_trajectory))
+
+    # connect each controller to the selector
+    builder.Connect(lqr_controller.get_output_port(), selector_controller.up_up_balance)
+    builder.Connect(tvlqr_controller.get_output_port(), selector_controller.swing_up)
+
+    # connect the state of the plant to each controller
+    builder.Connect(plant.get_state_output_port(), selector_controller.state_port)
+    builder.Connect(plant.get_state_output_port(), lqr_controller.state_port)
+    builder.Connect(plant.get_state_output_port(), tvlqr_controller.state_port)
+
+    # set the desired state for the lqr controller
+    desired_state = builder.AddSystem(ConstantVectorSource([0, np.pi, 0, 0, 0, 0]))
+    builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
+
+    # connec the selector to the actuator
+    builder.Connect(selector_controller.get_output_port(), plant.get_actuation_input_port())
+
+    # connect the controller to the plant
+    # builder.Connect(plant.get_state_output_port(),
+    #                 tvlqr_controller.state_port)
+    #
+    # builder.Connect(tvlqr_controller.get_output_port(),
+    #                 plant.get_actuation_input_port())
+
+    MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
+
+    diagram = builder.Build()
+    simulator = Simulator(diagram)
+
+    simulator.set_target_realtime_rate(1.0)
+    context = simulator.get_mutable_context()
+
+    plant_context = plant.GetMyContextFromRoot(context)
+
+    # set the initial positions
+    joint = plant.GetJointByName("shoulder")
+    joint.set_angle(plant_context, 0.0)
+    joint.set_angular_rate(plant_context, 0.0)
+
+    joint = plant.GetJointByName("elbow")
+    joint.set_angle(plant_context, 0.0)
+    joint.set_angular_rate(plant_context, 0.0)
+
+    joint = plant.GetJointByName("slider_joint")
+    joint.set_translation(plant_context, 0.0)
+    joint.set_translation_rate(plant_context, 0.0)
+
+    simulator.AdvanceTo(20.0)
+
 # double_pendulum()
 # lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0, shoulder_deviation=0.2, elbow_deviation=-0.2)
 # lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=np.pi, shoulder_deviation=0.1, elbow_deviation=-0.1)
 # lqr_double_swing_up()
-collocation_trajectory()
+up_up_K = lqr_double_pendulum(shoulder_angle=np.pi, elbow_angle=0)
+
+x_trajectory, u_trajectory = collocation_trajectory(animate=False)
+tvlqr(x_trajectory, u_trajectory, up_up_K)
+
