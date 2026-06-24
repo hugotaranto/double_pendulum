@@ -1,0 +1,127 @@
+<robot name="sliding_pendulum">
+
+  <!-- Make the sliding car link -->
+  <link name="slider">
+    <inertial>
+      <origin xyz="0 0 0" />
+      <mass value="1"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+    <!-- Visualise the slider as a box -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Join the slider to the world, but allow it to translate along one axis -->
+  <joint name="slider_joint" type="prismatic">
+    <parent link="world" />
+    <child link="slider" />
+
+    <!-- Axis of motion in the parent frame -->
+    <axis xyz="1 0 0" />
+
+    <!-- Limiting the motion -->
+    <!-- lower = min distance; upper = max distance; -->
+    <!-- effort = maximum force allowed to apply -->
+    <!-- velocity = maximum speed -->
+    <limit lower="0.0" upper="0.2" effort="100" velocity="1.0"></limit>
+
+  </joint>
+
+  <!-- Make the arm link -->
+  <link name="arm">
+    <inertial>
+      <origin xyz="0 0 -0.25" rpy="0 0 0" />
+      <mass value="0.25" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+    <!-- Visualise the arm -->
+    <visual>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"></origin>
+      <geometry>
+        <cylinder length="0.5" radius="0.01"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <!-- Visualise the center of mass of the arm -->
+    <visual>
+      <origin xyz="0 0 -0.25" />
+      <geometry>
+        <sphere radius=".02"/>
+      </geometry>
+      <material name="Red">
+        <color rgba="0.8 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Join the arm to the slider -->
+  <joint name="shoulder" type="continuous">
+    <parent link="slider"></parent>
+    <child link="arm"></child>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- Make the second arm link -->
+  <link name="forearm">
+
+    <inertial>
+      <origin xyz="0 0 -0.25" rpy="0 0 0" />
+      <mass value="0.25" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+
+    <!-- Visualise the arm -->
+    <visual>
+      <origin xyz = "0 0 -0.25" rpy="0 0 0" />
+      <geometry>
+        <cylinder length="0.5" radius="0.01"/>
+      </geometry>
+      <material name="black" />
+    </visual>
+
+    <!-- Visualise the center of mass -->
+    <visual>
+      <origin xyz = "0 0 -0.25" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.02" />
+      </geometry>
+      <material name="Red" />
+    </visual>
+
+    <!-- Visualise the joint -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+      <sphere radius="0.02" />
+      </geometry>
+      <material name="Blue">
+        <color rgba="0.0 0.0 0.8 1.0" />
+      </material>
+    </visual>
+  </link>
+
+  <joint name="elbow" type="continuous">
+    <parent link="arm" />
+    <child link="forearm" />
+    <axis xyz="0 1 0" />
+    <origin xyz="0 0 -0.5" />
+  </joint>
+
+  <!-- Add the transmission/actuator for the sliding joint -->
+  <transmission type="SimpleTransmission">
+    <actuator name="slider_motor" />
+    <joint name="slider_joint" />
+    <mechanicalReduction>1</mechanicalReduction>
+  </transmission>
+
+</robot>
