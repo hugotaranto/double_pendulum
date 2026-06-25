@@ -4,14 +4,14 @@
   <link name="slider">
     <inertial>
       <origin xyz="0 0 0" />
-      <mass value="1"/>
+      <mass value="0.5"/>
       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
     </inertial>
     <!-- Visualise the slider as a box -->
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.1 0.1 0.1"/>
+        <box size="0.05 0.05 0.05"/>
       </geometry>
       <material name="black">
         <color rgba="0 0 0 1"/>
@@ -36,27 +36,29 @@
   </joint>
 
   <!-- Make the arm link -->
+  <!-- Length = 0.1645 -->
+  <!-- COM = 0.072 -->
   <link name="arm">
     <inertial>
-      <origin xyz="0 0 -0.25" rpy="0 0 0" />
-      <mass value="0.25" />
+      <origin xyz="0 0 -0.072" rpy="0 0 0" />
+      <mass value="0.187" />
       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
     </inertial>
     <!-- Visualise the arm -->
     <visual>
-      <origin xyz="0 0 -0.25" rpy="0 0 0"></origin>
+      <origin xyz="0 0 -0.08225" rpy="0 0 0"></origin>
       <geometry>
-        <cylinder length="0.5" radius="0.01"/>
+        <cylinder length="0.1645" radius="0.01"/>
       </geometry>
-      <material name="black">
-        <color rgba="0 0 0 1"/>
+      <material name="green">
+        <color rgba="0 1.0 0 1"/>
       </material>
     </visual>
     <!-- Visualise the center of mass of the arm -->
     <visual>
-      <origin xyz="0 0 -0.25" />
+      <origin xyz="0 0 -0.072" />
       <geometry>
-        <sphere radius=".02"/>
+        <sphere radius=".015"/>
       </geometry>
       <material name="Red">
         <color rgba="0.8 0.0 0.0 1.0"/>
@@ -72,28 +74,31 @@
   </joint>
 
   <!-- Make the second arm link -->
+  <!-- Length = 0.133 -->
   <link name="forearm">
 
     <inertial>
-      <origin xyz="0 0 -0.25" rpy="0 0 0" />
-      <mass value="0.25" />
+      <origin xyz="0 0 -0.0665" rpy="0 0 0" />
+      <mass value="0.132" />
       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
     </inertial>
 
     <!-- Visualise the arm -->
     <visual>
-      <origin xyz = "0 0 -0.25" rpy="0 0 0" />
+      <origin xyz = "0 0 -0.0665" rpy="0 0 0" />
       <geometry>
-        <cylinder length="0.5" radius="0.01"/>
+        <cylinder length="0.133" radius="0.01"/>
       </geometry>
-      <material name="black" />
+      <material name="orange"> 
+        <color rgba="1 0.7 0 1"/>
+      </material>
     </visual>
 
     <!-- Visualise the center of mass -->
     <visual>
-      <origin xyz = "0 0 -0.25" rpy="0 0 0" />
+      <origin xyz = "0 0 -0.0665" rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.02" />
+        <sphere radius="0.015" />
       </geometry>
       <material name="Red" />
     </visual>
@@ -114,7 +119,7 @@
     <parent link="arm" />
     <child link="forearm" />
     <axis xyz="0 1 0" />
-    <origin xyz="0 0 -0.5" />
+    <origin xyz="0 0 -0.1645" />
   </joint>
 
   <!-- Add the transmission/actuator for the sliding joint -->

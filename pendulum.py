@@ -20,6 +20,7 @@ from pydrake.all import (
 )
 
 import time
+import sys
 from controllers import *
 
 def get_plant(file="./sliding_double_pendulum.urdf"):
@@ -42,7 +43,6 @@ def animate_trajectory(x_trajectory):
 
     plant, builder, scene_graph = get_diagram()
 
-    num_frames = 300
     MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
     diagram = builder.Build()
@@ -52,33 +52,39 @@ def animate_trajectory(x_trajectory):
     t0 = x_trajectory.start_time()
     tf = x_trajectory.end_time()
 
-    # dt = 0.01
     # animate to a real speed of 1s = 1s (+ small calculation time)
-    total_time = tf - t0
-    # gap between frames
-    dt = total_time / num_frames
+    playback_fps = 30
+    speed = 0.2
 
-    t = t0
-    while t <= tf:
-        x = x_trajectory.value(t).flatten()
+    fps = playback_fps / speed
+    dt_play = 1 / playback_fps    # seconds between frames
+    dt_sim = 1 / fps
+    sim_time = t0
+
+    print("")
+    while sim_time <= tf:
+        sys.stdout.write(f"Time: {sim_time:.1f}\r")
+
+        x = x_trajectory.value(sim_time).flatten()
 
         plant.SetPositionsAndVelocities(plant_context, x)
 
         diagram.ForcedPublish(context)
 
-        time.sleep(dt)
-        t += dt
+        time.sleep(dt_play)
+        sim_time += dt_sim
 
-def collocation_trajectory(plant, initial_state=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-                           final_state=(0.0, np.pi, 0.0, 0.0, 0.0, 0.0), keyframe_file=None):
+
+def collocation_trajectory(plant, initial_state=STATE_DICT["00"],
+                           final_state=STATE_DICT["11"], keyframe_file=None):
 
     context = plant.CreateDefaultContext()
     dircol = DirectCollocation(
             plant,
             context,
-            num_time_samples=40,
-            minimum_time_step=0.1,
-            maximum_time_step=0.6,
+            num_time_samples=60,
+            minimum_time_step=0.05,
+            maximum_time_step=0.5,
             input_port_index=plant.get_actuation_input_port().get_index()
     )
 
@@ -89,21 +95,41 @@ def collocation_trajectory(plant, initial_state=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
 
     dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
 
-    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 1)
-    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -1)
+    # slider position constraint (DON'T GO OFF THE EDGE!)
+    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 0.5)
+    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -0.5)
 
-    print(np.column_stack((initial_state, final_state)))
+    # actuation limits
+    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] <= 10)
+    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] >= -10)
+
+    # dircol.AddConstraintToAllKnotPoints(dircol.state()[5] <= 1000)
+    # dircol.AddConstraintToAllKnotPoints(dircol.state()[5] >= -1000)
+
 
     if keyframe_file is not None:
         # Load the initial trajectory from the keyframe generation
         data = np.load(keyframe_file)
         keyframes = data["keyframes"].T
-        times = data["times"]
+        # times = data["times"]
+        times = [0, 0.5, 1, 1.7, 2.4]
     else:
-        times = [0.0, 5.0]
+        times = [0.0, 4.0]
         keyframes = np.column_stack((initial_state, final_state))
 
-        # should also probably add some more constraints here
+        # dircol.AddRunningCost(dircol.state()[1]**2)
+        # dircol.AddRunningCost(dircol.state()[2]**2)
+
+        # u = dircol.input()[0]
+        # dircol.AddRunningCost(1 * u**2)
+        #
+        # x = dircol.state()
+        # dircol.AddRunningCost(0.001 * (x[1]**2 + x[2]**2))
+
+        # x = dircol.state()
+        # dircol.AddRunningCost(1 * x[5]**2)
+
+        # dircol.AddFinalCost(dircol.time())
 
     print("Keyframes:\n", keyframes)
     print("Times:", times)
@@ -119,10 +145,15 @@ def collocation_trajectory(plant, initial_state=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
 
     u_trajectory = dircol.ReconstructInputTrajectory(result)
     x_trajectory = dircol.ReconstructStateTrajectory(result)
+
+    print(f"Solution found in {x_trajectory.end_time()} seconds")
     
     return x_trajectory, u_trajectory
 
-def lqr(plant, shoulder_angle, elbow_angle, print_detail=False):
+def lqr(plant, state, print_detail=False):
+
+    shoulder_angle = state[1]
+    elbow_angle = state[2]
 
     context = plant.CreateDefaultContext()
 
@@ -162,7 +193,7 @@ def lqr(plant, shoulder_angle, elbow_angle, print_detail=False):
 
     # define Q: the cost for each of the states
     Q = np.diag([
-        50,     # slider position
+        20,     # slider position
         100,    # angle of first link
         100,    # angle of second link
         1,      # velocity of slider
@@ -182,7 +213,10 @@ def lqr(plant, shoulder_angle, elbow_angle, print_detail=False):
 
     return K
 
-def animate_lqr(K, shoulder_angle=np.pi, elbow_angle=0.0, disturbance=0.2):
+def animate_lqr(K, state, disturbance=0.1):
+    shoulder_angle = state[1]
+    elbow_angle = state[2]
+
     plant, builder, scene_graph = get_diagram()
 
     # add the controller
@@ -222,7 +256,7 @@ def animate_lqr(K, shoulder_angle=np.pi, elbow_angle=0.0, disturbance=0.2):
     joint.set_translation(plant_context, 0.0)
     joint.set_translation_rate(plant_context, 0.0)
 
-    simulator.AdvanceTo(20.0)
+    simulator.AdvanceTo(7.0)
 
 def double_pendulum():
 
@@ -275,6 +309,9 @@ def animate_tvlqr(K, x_traj, u_traj):
     # connect the controller to the plant
     builder.Connect(plant.get_state_output_port(), tvlqr_controller.state_port)
     builder.Connect(tvlqr_controller.get_output_port(), plant.get_actuation_input_port())
+
+    start_time = builder.AddSystem(ConstantVectorSource([0.0]))
+    builder.Connect(start_time.get_output_port(), tvlqr_controller.start_time)
 
     MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
@@ -355,8 +392,9 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
     desired_state = builder.AddSystem(ConstantVectorSource([0, np.pi, 0, 0, 0, 0]))
     builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
 
-    # connec the selector to the actuator
-    builder.Connect(selector_controller.get_output_port(), plant.get_actuation_input_port())
+    # connect the selector to the actuator
+    builder.Connect(selector_controller.get_output_port(0), plant.get_actuation_input_port())
+    builder.Connect(selector_controller.get_output_port(1), tvlqr_controller.start_time)
 
     MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
@@ -395,14 +433,37 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    lqr_K = lqr(plant, shoulder_angle=np.pi, elbow_angle=0.0)
-    animate_lqr(K=lqr_K, shoulder_angle=np.pi, elbow_angle=0.0)
+    # for key in STATE_DICT.keys():
+    #     lqr_K = lqr(plant, STATE_DICT[key])
+    #     animate_lqr(K=lqr_K, state=STATE_DICT[key], disturbance=0.1)
 
-    x_trajectory, u_trajectory = collocation_trajectory(plant, keyframe_file="./keyframes/swing_up_2.npz")
+    # lqr_K = lqr(plant, STATE_DICT["11"], print_detail=True)
+    # animate_lqr(K=lqr_K, state=STATE_DICT["01"], disturbance=0.01)
+
+    # x_trajectory, u_trajectory = collocation_trajectory(plant,
+    #                                                     initial_state=STATE_DICT["10"],
+    #                                                     final_state=STATE_DICT["11"],
+    #                                                     keyframe_file=None)
+
+    # x_trajectory, u_trajectory = collocation_trajectory(plant,
+    #                                                     initial_state=STATE_DICT["00"],
+    #                                                     final_state=STATE_DICT["11"],
+    #                                                     keyframe_file="./keyframes/swing_up_2.npz")
+
+    x_trajectory, u_trajectory = collocation_trajectory(plant,
+                                                        initial_state=STATE_DICT["00"],
+                                                        final_state=STATE_DICT["11"],
+                                                        keyframe_file="./keyframes/00_11_1.npz")
+
+    # x_trajectory, u_trajectory = collocation_trajectory_iteration(plant, STATE_DICT["00"], STATE_DICT["10"])
+
+    # x_trajectory, u_trajectory = collocation_trajectory_soft_goal(plant, initial_state=STATE_DICT["00"],
+    #                                                               goal_state=STATE_DICT["11"])
+
     animate_trajectory(x_trajectory)
 
     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
     animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory)
 
-    animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
+    # animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
 
