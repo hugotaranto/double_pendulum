@@ -74,6 +74,85 @@ def animate_trajectory(x_trajectory):
         time.sleep(dt_play)
         sim_time += dt_sim
 
+def collocation_copy(plant, initial_state, final_state, x_guess, u_guess, time_cut=None):
+
+    if time_cut is not None:
+        times = np.linspace(x_guess.start_time(), time_cut, 100)
+
+        X = np.column_stack([
+            x_guess.value(t).flatten()
+            for t in times
+        ])
+
+        X = np.column_stack((
+            X, final_state
+        ))
+
+        U = np.column_stack([
+            u_guess.value(t).flatten()
+            for t in times
+        ])
+
+        U = np.column_stack((
+            U, [0]
+        ))
+
+        # times = list(times).append(time_cut + 1.0)
+        times = list(times)
+        times.append(time_cut + 1.0)
+
+        x_guess = PiecewisePolynomial.FirstOrderHold(times, X)
+        u_guess = PiecewisePolynomial.FirstOrderHold(times, U)       
+
+    context = plant.CreateDefaultContext()
+    dircol = DirectCollocation(
+            plant,
+            context,
+            num_time_samples=40,
+            minimum_time_step=0.05,
+            maximum_time_step=0.5,
+            input_port_index=plant.get_actuation_input_port().get_index()
+    )
+
+    dircol.AddEqualTimeIntervalsConstraints()
+
+    dircol.prog().AddBoundingBoxConstraint(initial_state, initial_state,
+                                dircol.initial_state())
+
+    dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
+
+    # slider position constraint (DON'T GO OFF THE EDGE!)
+    # dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 1.0)
+    # dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -1.0)
+    #
+    # # actuation limits
+    # dircol.AddConstraintToAllKnotPoints(dircol.input()[0] <= 10)
+    # dircol.AddConstraintToAllKnotPoints(dircol.input()[0] >= -10)
+
+    # print("Keyframes:\n", keyframes)
+    # print("Times:", times)
+
+    # initial_x_trajectory = PiecewisePolynomial.FirstOrderHold(
+    #         times, keyframes
+    # )
+
+    u = dircol.input()[0]
+    dircol.AddRunningCost(u**2)
+
+    dircol.AddFinalCost(dircol.time())
+
+    dircol.SetInitialTrajectory(u_guess, x_guess)
+
+    result = Solve(dircol.prog())
+    assert result.is_success()
+
+    u_trajectory = dircol.ReconstructInputTrajectory(result)
+    x_trajectory = dircol.ReconstructStateTrajectory(result)
+
+    print(f"Solution found in {x_trajectory.end_time()} seconds")
+    
+    return x_trajectory, u_trajectory
+
 
 def collocation_trajectory(plant, initial_state=STATE_DICT["00"],
                            final_state=STATE_DICT["11"], keyframe_file=None):
@@ -455,10 +534,29 @@ if __name__ == "__main__":
                                                         final_state=STATE_DICT["11"],
                                                         keyframe_file="./keyframes/00_11_1.npz")
 
+    times = np.linspace(
+            x_trajectory.start_time(),
+            x_trajectory.end_time(),
+            200
+    )
+
+    thresh = 1.5
+
+    for t in times:
+        x = x_trajectory.value(t).flatten()
+
+        if (abs(x[1] - np.pi) < thresh and abs(x[2] - np.pi) < thresh):
+            print(x)
+
+    print("Done...")
+
     # x_trajectory, u_trajectory = collocation_trajectory_iteration(plant, STATE_DICT["00"], STATE_DICT["10"])
 
     # x_trajectory, u_trajectory = collocation_trajectory_soft_goal(plant, initial_state=STATE_DICT["00"],
     #                                                               goal_state=STATE_DICT["11"])
+
+    x_trajectory, u_trajectory = collocation_copy(plant, STATE_DICT["00"], STATE_DICT["10"],
+                                                  x_guess=x_trajectory, u_guess=u_trajectory, time_cut=2.0)
 
     animate_trajectory(x_trajectory)
 
