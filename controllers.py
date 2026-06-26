@@ -69,8 +69,8 @@ class SelectorController(LeafSystem):
             #     abs(x[4]) < 1.5 and
             #     abs(x[5]) < 1.5):
             if (
-                    abs(abs(x[1]) - np.pi) < 0.1 and
-                    abs(abs(x[2]) - 0.0) < 0.1
+                    abs(abs(x[1]) - np.pi) < 0.2 and
+                    abs(abs(x[2]) - 0.0) < 0.2
                     ):
 
                 fsm.SetAtIndex(0, UP_BALANCE)

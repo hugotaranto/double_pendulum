@@ -1,4 +1,5 @@
 import numpy as np
+import pydrake.symbolic as sym
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
     DiagramBuilder,
@@ -40,7 +41,7 @@ def get_diagram(file="./sliding_double_pendulum.urdf"):
 
     return plant, builder, scene_graph
 
-def animate_trajectory(x_trajectory):
+def animate_trajectory(x_trajectory, speed=1.0):
 
     plant, builder, scene_graph = get_diagram()
 
@@ -55,7 +56,6 @@ def animate_trajectory(x_trajectory):
 
     # animate to a real speed of 1s = 1s (+ small calculation time)
     playback_fps = 30
-    speed = 0.2
 
     fps = playback_fps / speed
     dt_play = 1 / playback_fps    # seconds between frames
@@ -296,13 +296,49 @@ def collocation_trajectory(plant, initial_state=STATE_DICT["00"],
     
     return x_trajectory, u_trajectory
 
+def trajectory_cleanup(x_trajectory, u_trajectory, goal_state, threshold, num_samples, idxs=[1, 2, 4, 5]):
+
+    goal_state = np.asarray(goal_state)
+
+    # Sample trajectory densely
+    times = np.linspace(x_trajectory.start_time(),
+                         x_trajectory.end_time(), num_samples)
+
+    X = np.column_stack([x_trajectory.value(t).flatten() for t in times])
+    U = np.column_stack([u_trajectory.value(t).flatten() for t in times])
+
+    # Find last index where NOT close to goal
+    last_bad_idx = 0
+
+    for i in reversed(range(num_samples)):
+        error = np.abs(X[idxs, i] - goal_state[idxs])
+
+        if np.any(error > threshold):
+            last_bad_idx = i
+            break
+
+    # Keep everything up to that point (+ a small buffer)
+    last_idx = min(last_bad_idx + 10, num_samples - 1)
+
+    times_cut = times[:last_idx + 1]
+    X_cut = X[:, :last_idx + 1]
+    U_cut = U[:, :last_idx + 1]
+
+    # Rebuild trajectories
+    x_trimmed = PiecewisePolynomial.FirstOrderHold(times_cut, X_cut)
+    u_trimmed = PiecewisePolynomial.FirstOrderHold(times_cut, U_cut)
+
+    return x_trimmed, u_trimmed
+
 def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
 
     context = plant.CreateDefaultContext()
 
-    # target_time = 2.4
-    target_time = 2.2
-    num_time_steps = 200
+    # target_time = 2.3
+    # num_time_steps = 200
+
+    target_time = 4.0
+    num_time_steps = 250
 
     time_step = target_time / num_time_steps
 
@@ -319,17 +355,41 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
     dirtran.prog().AddBoundingBoxConstraint(initial_state, initial_state,
                                 dirtran.initial_state())
 
-    # change the constraint, so that the cart can be within a range of the center
-    lower_final = np.copy(final_state)
-    upper_final = np.copy(final_state)
+    # slider position constraint (DON'T GO OFF THE EDGE!)
+    dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] <= 0.4)
+    dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] >= -0.4)
 
-    # lower_final[0] = -0.2
-    # upper_final[0] = 0.2
+    # actuation limits
+    # dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= 1.5)
 
-    dirtran.prog().AddBoundingBoxConstraint(lower_final, upper_final, dirtran.final_state())
+    dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
 
-    # u = dirtran.input()[0]
-    # dirtran.AddRunningCost(u**2)
+    u = dirtran.input()[0]
+    dirtran.AddRunningCost(1.0 * u**2)
+
+    # slow down the swing speed
+    state = dirtran.state()
+    # dirtran.AddRunningCost(2.0 * state[4]**2)
+    # dirtran.AddRunningCost(2.0 * state[5]**2)
+    # dirtran.AddRunningCost(5.0 * state[0]**2)
+    # dirtran.AddRunningCost(1.0 * state[2]**2)
+
+    # penalise time where the pendulum is in the final state (try and get it to not balance in final state)
+    # dirtran.AddRunningCost(
+    #     sym.exp(-50 * (state[1] - final_state[1])**2)
+    # )
+    #
+    # dirtran.AddRunningCost(
+    #     sym.exp(-50 * (state[2] - final_state[2])**2)
+    # )
+
+    # theta = state[1]
+    # theta_err = theta - final_state[1]
+    # theta_dot = state[4]
+    #
+    # dirtran.AddRunningCost(
+    #     sym.exp(-50 * theta_err**2) * theta_dot**2
+    # )
 
     if keyframe_file is not None:
         data = np.load(keyframe_file)
@@ -337,7 +397,7 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
         # times = data["times"]
         times = [0, 0.5, 1, 1.7, 2.4]
     else:
-        times = [0.0, 4.0]
+        times = [0.0, target_time]
         keyframes = np.column_stack((initial_state, final_state))
 
 
@@ -738,15 +798,64 @@ if __name__ == "__main__":
     plant = get_plant()
 
     # test direct transcription
-    x_trajectory, u_trajectory = direct_transcription(plant,
+    x_traj, u_traj = direct_transcription(plant,
                                                       initial_state=STATE_DICT["00"],
                                                       final_state=STATE_DICT["11"],
                                                       keyframe_file=None)
 
-    animate_trajectory(x_trajectory)
+    animate_trajectory(x_traj, speed=0.5)
+
+    x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
+                                                    STATE_DICT["11"], threshold=0.1,
+                                                    num_samples=200, idxs=[1, 2])
+
+    # while(1):
+    #     text = input("Enter threshold ('exit' to quit): ")
+    #
+    #     if text == "exit":
+    #         break
+    #
+    #     try:
+    #         threshold = float(text)
+    #     except:
+    #         continue
+    #
+    #     indices = input("Enter indices: ")
+    #
+    #     try:
+    #         indices = indices.split(" ")
+    #         indices_int = []
+    #         for indice in indices:
+    #             indices_int.append(int(indice))
+    #     except:
+    #         continue
+    #
+    #     x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
+    #                                                     STATE_DICT["11"], threshold=threshold,
+    #                                                     num_samples=200, idxs=indices_int)
+    #
+    #     animate_trajectory(x_trajectory)
+    #
+    #     do_next = input("Do the tvlqr (y/n): ")
+    #
+    #     if do_next == "y":
+    #         tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+    #         animate_tvlqr(tvlqr_K, x_trajectory, u_trajectory, initial_state=STATE_DICT["00"])
+    #     else:
+    #         continue
+    #
+    # print("")
+    # print(x_trajectory.start_time())
+    # print(x_trajectory.end_time())
+    #
+
+    lqr_K = lqr(plant, STATE_DICT["11"])
 
     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
     animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=STATE_DICT["00"])
+
+    animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
+
 
     # for key in STATE_DICT.keys():
     #     lqr_K = lqr(plant, STATE_DICT[key])
