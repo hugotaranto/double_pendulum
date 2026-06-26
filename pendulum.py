@@ -108,15 +108,12 @@ def trajectory_cleanup(x_trajectory, u_trajectory, goal_state, threshold, num_sa
 
     return x_trimmed, u_trimmed
 
-def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
+def direct_transcription(plant, initial_state, final_state, params):
 
     context = plant.CreateDefaultContext()
 
-    # target_time = 2.3
-    # num_time_steps = 200
-
-    target_time = 3.5
-    num_time_steps = 500
+    target_time = params[TranscriptionParams.TARGET_TIME.value]
+    num_time_steps = params[TranscriptionParams.NUM_TIME_STEPS.value]
 
     time_step = target_time / num_time_steps
 
@@ -128,8 +125,6 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
             input_port_index=plant.get_actuation_input_port().get_index()
     )
 
-    # dirtran.AddEqualTimeIntervalsConstraints()
-
     dirtran.prog().AddBoundingBoxConstraint(initial_state, initial_state,
                                 dirtran.initial_state())
 
@@ -138,47 +133,27 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
     dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] >= -0.4)
 
     # actuation limits
-    dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= 2.5)
+    dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= params[TranscriptionParams.ACTUATION_CONSTRAINT.value])
 
     dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
 
     u = dirtran.input()[0]
-    dirtran.AddRunningCost(1.0 * u**2)
+    dirtran.AddRunningCost(params[TranscriptionParams.INPUT_COST.value] * u**2)
 
     # slow down the swing speed
     state = dirtran.state()
-    dirtran.AddRunningCost(0.5 * state[4]**2)
-    dirtran.AddRunningCost(0.5 * state[5]**2)
-    # dirtran.AddRunningCost(5.0 * state[0]**2)
-    # dirtran.AddRunningCost(1.0 * state[2]**2)
+    dirtran.AddRunningCost(params[TranscriptionParams.SHOULDER_VELOCITY_COST.value] * state[4]**2)
+    dirtran.AddRunningCost(params[TranscriptionParams.ELBOW_VELOCITY_COST.value] * state[5]**2)
 
-    # penalise time where the pendulum is in the final state (try and get it to not balance in final state)
-    # dirtran.AddRunningCost(
-    #     sym.exp(-50 * (state[1] - final_state[1])**2)
-    # )
-    #
-    # dirtran.AddRunningCost(
-    #     sym.exp(-50 * (state[2] - final_state[2])**2)
-    # )
-
-    # theta = state[1]
-    # theta_err = theta - final_state[1]
-    # theta_dot = state[4]
-    #
-    # dirtran.AddRunningCost(
-    #     sym.exp(-50 * theta_err**2) * theta_dot**2
-    # )
+    keyframe_file = params[TranscriptionParams.KEY_FRAME_FILE.value]
 
     if keyframe_file is not None:
         data = np.load(keyframe_file)
         keyframes = data["keyframes"].T
-        # times = data["times"]
-        # times = [0, 0.5, 1, 1.7, 2.4]
         times = np.linspace(0, target_time, len(data["keyframes"]))
     else:
         times = [0.0, target_time]
         keyframes = np.column_stack((initial_state, final_state))
-
 
     print("Keyframes:\n", keyframes)
     print("Times:", times)
@@ -477,24 +452,41 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    initial_state = STATE_DICT["00"]
-    target_state = STATE_DICT["10"]
+    transition = "00_10"
+
+    transcription_params = TRANSCRIPTION_PARAMS[transition]
+    states = transition.split("_")
+    initial_state = STATE_DICT[states[0]]
+    goal_state = STATE_DICT[states[1]]
+
+    lqr_K = lqr(plant, goal_state)    
+    x_trajectory, u_trajectory = direct_transcription(plant,
+                                                      initial_state,
+                                                      goal_state,
+                                                      transcription_params)
+
+    x_trajectory, u_trajectory = time_cut(x_trajectory, u_trajectory,
+                                          transcription_params[TranscriptionParams.TIME_CUTOFF.value])
+
+    tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, goal_state)
 
     # test direct transcription
-    x_traj, u_traj = direct_transcription(plant,
-                                          initial_state=initial_state,
-                                          final_state=target_state,
-                                          keyframe_file="./keyframes/00_10_2.npz")
-
-
-    animate_trajectory(x_traj, speed=0.5)
-    x_trajectory, u_trajectory = time_cut(x_traj, u_traj, 2.65)
-
-    lqr_K = lqr(plant, target_state)
-    tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-
-    # animate the full system
-    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state)
+    # x_traj, u_traj = direct_transcription(plant,
+    #                                       initial_state=initial_state,
+    #                                       final_state=target_state,
+    #                                       params=TRANSCRIPTION_PARAMS["00_11"],
+    #                                       keyframe_file=None)
+    #
+    #
+    # animate_trajectory(x_traj, speed=0.5)
+    # x_trajectory, u_trajectory = time_cut(x_traj, u_traj, 2.65)
+    #
+    # lqr_K = lqr(plant, target_state)
+    # tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+    #
+    # # animate the full system
+    # animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state)
 
     # while(1):
     #
@@ -505,6 +497,13 @@ if __name__ == "__main__":
     #         continue
     #
     #     x_trajectory, u_trajectory = time_cut(x_traj, u_traj, thresh)
+    #
+    #     animate_trajectory(x_trajectory, speed=0.5)
+    #
+    #     text = input("Go again? (y/n): ")
+    #
+    #     if text == "y":
+    #         continue
     #
     #     lqr_K = lqr(plant, target_state)
     #
