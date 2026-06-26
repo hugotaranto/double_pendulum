@@ -3,7 +3,6 @@ import pydrake.symbolic as sym
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
     DiagramBuilder,
-    LogVectorOutput,
     MeshcatVisualizer,
     Parser,
     Simulator,
@@ -12,7 +11,6 @@ from pydrake.all import (
     Linearize,
     LinearQuadraticRegulator,
     ControllabilityMatrix,
-    DirectCollocation,
     PiecewisePolynomial,
     Solve,
     FiniteHorizonLinearQuadraticRegulator,
@@ -75,226 +73,6 @@ def animate_trajectory(x_trajectory, speed=1.0):
         time.sleep(dt_play)
         sim_time += dt_sim
 
-def collocation_copy_2(plant, initial_state, final_state, x_guess, u_guess, time_cut=None):
-
-    if time_cut is not None:
-        times = np.linspace(x_guess.start_time(), time_cut, 100)
-
-        X = np.column_stack([
-            x_guess.value(t).flatten()
-            for t in times
-        ])
-
-        X = np.column_stack((
-            X, final_state
-        ))
-
-        U = np.column_stack([
-            u_guess.value(t).flatten()
-            for t in times
-        ])
-
-        U = np.column_stack((
-            U, [0]
-        ))
-
-        # times = list(times).append(time_cut + 1.0)
-        times = list(times)
-        times.append(time_cut + 1.0)
-
-        x_guess = PiecewisePolynomial.FirstOrderHold(times, X)
-        u_guess = PiecewisePolynomial.FirstOrderHold(times, U)       
-
-    context = plant.CreateDefaultContext()
-    dircol = DirectCollocation(
-            plant,
-            context,
-            num_time_samples=40,
-            minimum_time_step=0.05,
-            maximum_time_step=0.2,
-            input_port_index=plant.get_actuation_input_port().get_index()
-    )
-
-    # dircol.AddEqualTimeIntervalsConstraints()
-
-    dircol.prog().AddBoundingBoxConstraint(initial_state, initial_state,
-                                dircol.initial_state())
-
-    dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
-
-    u = dircol.input()[0]
-    dircol.AddRunningCost(0.8 * u**2)
-
-    # dircol.AddFinalCost(dircol.time())
-    x = dircol.state()
-    dircol.AddRunningCost(0.01 * (x[3]**2 + x[4]**2 + x[5]**2))
-
-    dircol.SetInitialTrajectory(u_guess, x_guess)
-
-    result = Solve(dircol.prog())
-    assert result.is_success()
-
-    u_trajectory = dircol.ReconstructInputTrajectory(result)
-    x_trajectory = dircol.ReconstructStateTrajectory(result)
-
-    print(f"Solution found in {x_trajectory.end_time()} seconds")
-    
-    return x_trajectory, u_trajectory
-
-def collocation_copy(plant, initial_state, final_state, x_guess, u_guess, time_cut=None):
-
-    if time_cut is not None:
-        times = np.linspace(x_guess.start_time(), time_cut, 100)
-
-        X = np.column_stack([
-            x_guess.value(t).flatten()
-            for t in times
-        ])
-
-        X = np.column_stack((
-            X, final_state
-        ))
-
-        U = np.column_stack([
-            u_guess.value(t).flatten()
-            for t in times
-        ])
-
-        U = np.column_stack((
-            U, [0]
-        ))
-
-        # times = list(times).append(time_cut + 1.0)
-        times = list(times)
-        times.append(time_cut + 1.0)
-
-        x_guess = PiecewisePolynomial.FirstOrderHold(times, X)
-        u_guess = PiecewisePolynomial.FirstOrderHold(times, U)       
-
-    context = plant.CreateDefaultContext()
-    dircol = DirectCollocation(
-            plant,
-            context,
-            num_time_samples=40,
-            minimum_time_step=0.05,
-            maximum_time_step=0.5,
-            input_port_index=plant.get_actuation_input_port().get_index()
-    )
-
-    dircol.AddEqualTimeIntervalsConstraints()
-
-    dircol.prog().AddBoundingBoxConstraint(initial_state, initial_state,
-                                dircol.initial_state())
-
-    dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
-
-    # slider position constraint (DON'T GO OFF THE EDGE!)
-    # dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 1.0)
-    # dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -1.0)
-    #
-    # # actuation limits
-    # dircol.AddConstraintToAllKnotPoints(dircol.input()[0] <= 10)
-    # dircol.AddConstraintToAllKnotPoints(dircol.input()[0] >= -10)
-
-    # print("Keyframes:\n", keyframes)
-    # print("Times:", times)
-
-    # initial_x_trajectory = PiecewisePolynomial.FirstOrderHold(
-    #         times, keyframes
-    # )
-
-    u = dircol.input()[0]
-    dircol.AddRunningCost(u**2)
-
-    dircol.AddFinalCost(dircol.time())
-
-    dircol.SetInitialTrajectory(u_guess, x_guess)
-
-    result = Solve(dircol.prog())
-    assert result.is_success()
-
-    u_trajectory = dircol.ReconstructInputTrajectory(result)
-    x_trajectory = dircol.ReconstructStateTrajectory(result)
-
-    print(f"Solution found in {x_trajectory.end_time()} seconds")
-    
-    return x_trajectory, u_trajectory
-
-
-def collocation_trajectory(plant, initial_state=STATE_DICT["00"],
-                           final_state=STATE_DICT["11"], keyframe_file=None):
-
-    context = plant.CreateDefaultContext()
-    dircol = DirectCollocation(
-            plant,
-            context,
-            num_time_samples=60,
-            minimum_time_step=0.05,
-            maximum_time_step=0.5,
-            input_port_index=plant.get_actuation_input_port().get_index()
-    )
-
-    dircol.AddEqualTimeIntervalsConstraints()
-
-    dircol.prog().AddBoundingBoxConstraint(initial_state, initial_state,
-                                dircol.initial_state())
-
-    dircol.prog().AddBoundingBoxConstraint(final_state, final_state, dircol.final_state())
-
-    # slider position constraint (DON'T GO OFF THE EDGE!)
-    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] <= 0.5)
-    dircol.AddConstraintToAllKnotPoints(dircol.state()[0] >= -0.5)
-
-    # actuation limits
-    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] <= 10)
-    dircol.AddConstraintToAllKnotPoints(dircol.input()[0] >= -10)
-
-    # dircol.AddConstraintToAllKnotPoints(dircol.state()[5] <= 1000)
-    # dircol.AddConstraintToAllKnotPoints(dircol.state()[5] >= -1000)
-
-
-    if keyframe_file is not None:
-        # Load the initial trajectory from the keyframe generation
-        data = np.load(keyframe_file)
-        keyframes = data["keyframes"].T
-        # times = data["times"]
-        times = [0, 0.5, 1, 1.7, 2.4]
-    else:
-        times = [0.0, 4.0]
-        keyframes = np.column_stack((initial_state, final_state))
-
-        # dircol.AddRunningCost(dircol.state()[1]**2)
-        # dircol.AddRunningCost(dircol.state()[2]**2)
-
-        # u = dircol.input()[0]
-        # dircol.AddRunningCost(1 * u**2)
-        #
-        # x = dircol.state()
-        # dircol.AddRunningCost(0.001 * (x[1]**2 + x[2]**2))
-
-        # x = dircol.state()
-        # dircol.AddRunningCost(1 * x[5]**2)
-
-        # dircol.AddFinalCost(dircol.time())
-
-    print("Keyframes:\n", keyframes)
-    print("Times:", times)
-
-    initial_x_trajectory = PiecewisePolynomial.FirstOrderHold(
-            times, keyframes
-    )
-
-    dircol.SetInitialTrajectory(PiecewisePolynomial(), initial_x_trajectory)
-
-    result = Solve(dircol.prog())
-    assert result.is_success()
-
-    u_trajectory = dircol.ReconstructInputTrajectory(result)
-    x_trajectory = dircol.ReconstructStateTrajectory(result)
-
-    print(f"Solution found in {x_trajectory.end_time()} seconds")
-    
-    return x_trajectory, u_trajectory
 
 def trajectory_cleanup(x_trajectory, u_trajectory, goal_state, threshold, num_samples, idxs=[1, 2, 4, 5]):
 
@@ -528,44 +306,6 @@ def animate_lqr(K, state, disturbance=0.1):
 
     simulator.AdvanceTo(7.0)
 
-def double_pendulum():
-
-    builder = DiagramBuilder()
-    plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=0.0)
-    parser = Parser(plant)
-    parser.AddModels("./sliding_double_pendulum.urdf")
-    plant.Finalize()
-
-    builder.ExportInput(plant.get_actuation_input_port())
-    MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
-
-    logger = LogVectorOutput(plant.get_state_output_port(), builder)
-
-    diagram = builder.Build()
-    simulator = Simulator(diagram)
-
-    simulator.set_target_realtime_rate(1.0)
-    context = simulator.get_mutable_context()
-
-    plant_context = plant.GetMyContextFromRoot(context)
-
-    # set the initial positions
-    joint = plant.GetJointByName("shoulder")
-    joint.set_angle(plant_context, np.pi)
-    joint.set_angular_rate(plant_context, 0.0)
-
-    joint = plant.GetJointByName("elbow")
-    joint.set_angle(plant_context, np.pi)
-    joint.set_angular_rate(plant_context, 0.0)
-
-    joint = plant.GetJointByName("slider_joint")
-    joint.set_translation(plant_context, 0.0)
-    joint.set_translation_rate(plant_context, 0.0)
-
-    # torque input for the sliding joint
-    diagram.get_input_port(0).FixValue(context, [0.0])    
-
-    simulator.AdvanceTo(10.0)
 
 def animate_tvlqr(K, x_traj, u_traj, initial_state):
 
@@ -704,87 +444,6 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
 
     simulator.AdvanceTo(20.0)
 
-
-def unwrap_state_matrix(X, angle_idxs):
-    X = X.copy()
-
-    for i in angle_idxs:
-        X[i, :] = np.unwrap(X[i, :])
-
-    return X
-
-def sample_traj(x, t_grid):
-    return np.column_stack([x.value(t).flatten() for t in t_grid])
-
-def make_angle_continuous_samples(X, angle_idxs):
-    X = X.copy()
-
-    for i in angle_idxs:
-        for k in range(1, X.shape[1]):
-            delta = X[i, k] - X[i, k-1]
-            delta = (delta + np.pi) % (2*np.pi) - np.pi
-            X[i, k] = X[i, k-1] + delta
-
-    return X
-
-def angle_safe_stitch(x1, u1, x2, u2, cut_time=3.0, N=200, blend=5, angle_idxs=[0, 2]):
-
-    t1 = np.linspace(x1.start_time(), x1.end_time(), N)
-    t2_full = np.linspace(x2.start_time(), x2.end_time(), N)
-
-    X1 = sample_traj(x1, t1)
-    U1 = sample_traj(u1, t1)
-
-    X2_full = sample_traj(x2, t2_full)
-    U2_full = sample_traj(u2, t2_full)
-
-    # ---------------------------
-    # STEP 1: make BOTH trajectories continuous FIRST
-    # ---------------------------
-    X1 = make_angle_continuous_samples(X1, angle_idxs)
-    X2_full = make_angle_continuous_samples(X2_full, angle_idxs)
-
-    # ---------------------------
-    # STEP 2: NOW cut x2 (after continuity is established)
-    # ---------------------------
-    mask = t2_full >= cut_time
-    t2 = t2_full[mask]
-
-    X2 = X2_full[:, mask]
-    U2 = U2_full[:, mask]
-
-    # ---------------------------
-    # STEP 3: enforce continuity at join
-    # ---------------------------
-    x_end = X1[:, -1]
-
-    for i in angle_idxs:
-        delta = X2[i, 0] - x_end[i]
-        X2[i, :] -= np.round(delta / (2*np.pi)) * (2*np.pi)
-
-    # ---------------------------
-    # STEP 4: blend
-    # ---------------------------
-    b = min(blend, X2.shape[1])
-    for k in range(b):
-        a = k / max(b - 1, 1)
-        X2[:, k] = (1 - a) * x_end + a * X2[:, k]
-
-    # ---------------------------
-    # STEP 5: time shift
-    # ---------------------------
-    T1 = x1.end_time()
-    t2 = (t2 - cut_time) + T1
-
-    times = np.concatenate([t1, t2])
-    X = np.concatenate([X1, X2], axis=1)
-    U = np.concatenate([U1, U2], axis=1)
-
-    return (
-        PiecewisePolynomial.FirstOrderHold(times, X),
-        PiecewisePolynomial.FirstOrderHold(times, U)
-    )
-
 if __name__ == "__main__":
 
     # start the meshcat server and wait until there is a connection
@@ -846,6 +505,7 @@ if __name__ == "__main__":
     #
     # print("")
     # print(x_trajectory.start_time())
+
     # print(x_trajectory.end_time())
     #
 
@@ -856,93 +516,4 @@ if __name__ == "__main__":
 
     animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
 
-
-    # for key in STATE_DICT.keys():
-    #     lqr_K = lqr(plant, STATE_DICT[key])
-    #     animate_lqr(K=lqr_K, state=STATE_DICT[key], disturbance=0.1)
-
-    # lqr_K = lqr(plant, STATE_DICT["11"], print_detail=True)
-    # animate_lqr(K=lqr_K, state=STATE_DICT["01"], disturbance=0.01)
-
-    # x_trajectory, u_trajectory = collocation_trajectory(plant,
-    #                                                     initial_state=STATE_DICT["10"],
-    #                                                     final_state=STATE_DICT["11"],
-    #                                                     keyframe_file=None)
-
-    # x_trajectory, u_trajectory = collocation_trajectory(plant,
-    #                                                     initial_state=STATE_DICT["00"],
-    #                                                     final_state=STATE_DICT["11"],
-    #                                                     keyframe_file="./keyframes/swing_up_2.npz")
-
-    # x1, u1 = collocation_trajectory(plant,
-    #                                                     initial_state=STATE_DICT["00"],
-    #                                                     final_state=STATE_DICT["11"],
-    #                                                     keyframe_file="./keyframes/00_11_1.npz")
-    #
-    # # x_trajectory, u_trajectory = collocation_trajectory_iteration(plant, STATE_DICT["00"], STATE_DICT["10"])
-    #
-    # # x_trajectory, u_trajectory = collocation_trajectory_soft_goal(plant, initial_state=STATE_DICT["00"],
-    # #                                                               goal_state=STATE_DICT["11"])
-    #
-    # x2, u2 = collocation_copy(plant, STATE_DICT["00"], STATE_DICT["10"],
-    #                                               x_guess=x1, u_guess=u1, time_cut=2.0)
-    #
-    # # print(x1.value(x1.end_time()))
-    # # print(x2.value(2.9))
-    # # print(x2.value(3.0))
-    # # print(x2.value(3.1))
-    # # print(x2.value(3.2))
-    # # print(x2.value(3.3))
-    #
-    # x, u = angle_safe_stitch(x1, u1, x2, u2, cut_time=3.1)
-    #
-    # # animate_trajectory(x)
-    # x_trajectory, u_trajectory = collocation_copy(plant, STATE_DICT["00"], STATE_DICT["10"],
-    #                           x_guess=x, u_guess=u)
-    #
-    # times = np.linspace(3.0, x2.end_time(), 100)
-    #
-    # x3 = np.column_stack([
-    #     x2.value(t).flatten()
-    #     for t in times
-    # ])
-    #
-    # u3 = np.column_stack([
-    #     u2.value(t).flatten()
-    #     for t in times
-    # ])
-    #
-    # start_time = times[0]
-    # times = times - start_time
-    #
-    # x3 = np.column_stack((STATE_DICT["11"], x3, STATE_DICT["10"]))
-    # u3 = np.column_stack(([0], u3, [0]))
-    #
-    # times = list(times)
-    # times.append(times[-1] + times[1] - times[0])
-    # times.append(times[-1] + times[1] - times[0])
-    # print(times)
-    #
-    # x3 = PiecewisePolynomial.FirstOrderHold(times, x3)
-    # u3 = PiecewisePolynomial.FirstOrderHold(times, u3)
-    #
-    # animate_trajectory(x3)
-    #
-    # # tvlqr_K = tvlqr(x3, u3, plant)
-    # # animate_tvlqr(tvlqr_K, x_traj=x3, u_traj=u3, initial_state=STATE_DICT["11"])
-    #
-    # x4, u4 = collocation_copy_2(plant, STATE_DICT["11"], STATE_DICT["10"], x_guess=x3, u_guess=u3)
-    #
-    # # from 3 seconds it goes from 11 to 10 nicely
-    # # splice them together
-    #
-    # # take all of x1, u1 -> 00 -> 11, then from 3 seconds to end of x2, u2
-    # # also would be nice to even out the time gap (don't want to jump back in time from end of x1 to 3 seconds into x2)
-    # 
-    # animate_trajectory(x4)
-    #
-    # # tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    # # animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory)
-    #
-    # # animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
 
