@@ -474,20 +474,11 @@ if __name__ == "__main__":
     # test direct transcription
     # x_traj, u_traj = direct_transcription(plant,
     #                                       initial_state=initial_state,
-    #                                       final_state=target_state,
-    #                                       params=TRANSCRIPTION_PARAMS["00_11"],
-    #                                       keyframe_file=None)
-    #
+    #                                       final_state=goal_state,
+    #                                       params=transcription_params)
     #
     # animate_trajectory(x_traj, speed=0.5)
-    # x_trajectory, u_trajectory = time_cut(x_traj, u_traj, 2.65)
     #
-    # lqr_K = lqr(plant, target_state)
-    # tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    #
-    # # animate the full system
-    # animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state)
-
     # while(1):
     #
     #     thresh = input("Threshold input: ")
@@ -505,13 +496,13 @@ if __name__ == "__main__":
     #     if text == "y":
     #         continue
     #
-    #     lqr_K = lqr(plant, target_state)
+    #     lqr_K = lqr(plant, goal_state)
     #
     #     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
     #     animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=initial_state)
     #
     #     animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
-    #                         u_trajectory=u_trajectory, target_state=target_state)
+    #                         u_trajectory=u_trajectory, target_state=goal_state)
 
     # while(1):
     #     text = input("Enter threshold ('exit' to quit): ")
