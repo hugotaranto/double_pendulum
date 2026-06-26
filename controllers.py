@@ -9,11 +9,11 @@ class SelectorController(LeafSystem):
     def __init__(self):
         super().__init__()
 
-        # self.mode = "swing_up"      # initialise with swing up mode
-
         self.state_port = self.DeclareVectorInputPort(name="estimated_state", size=6)
         self.swing_up = self.DeclareVectorInputPort(name="swing_up", size=1)
         self.up_up_balance = self.DeclareVectorInputPort(name="up_up_balance", size=1)
+        self.target = self.DeclareVectorInputPort(name="target", size=6)
+        self.swing_time = self.DeclareVectorInputPort(name="swing_time", size=1)
 
         self.fsm_state = self.DeclareDiscreteState(2)   # the current state of the system and time
 
@@ -42,6 +42,8 @@ class SelectorController(LeafSystem):
 
     def UpdateMode(self, context, discrete_state):
         x = self.state_port.Eval(context)
+        target_x = self.target.Eval(context)
+        swing_time = self.swing_time.Eval(context)
 
         # mode = discrete_state.get_mutable_vector().GetAtIndex(0)
         # mode_start_time = discrete_state.get_mutable_vector().GetAtIndex(1)
@@ -53,7 +55,7 @@ class SelectorController(LeafSystem):
         elapsed_time = time - mode_start_time
 
         if mode == DOWN_BALANCE:
-            if elapsed_time >= 5:
+            if elapsed_time >= 1:
                 # mode = SWING_UP
                 print("Switching to swing up")
                 fsm.SetAtIndex(0, SWING_UP)
@@ -61,17 +63,10 @@ class SelectorController(LeafSystem):
         elif mode == SWING_UP:
             # check if the goal state has been reached
 
-            print(x[1], x[2], x[4], x[5])
-
-            # if(
-            #     abs(abs(x[1]) - np.pi) < 1.0 and
-            #     abs(abs(x[2]) - 0.0) < 1.0 and
-            #     abs(x[4]) < 1.5 and
-            #     abs(x[5]) < 1.5):
             if (
-                    abs(abs(x[1]) - np.pi) < 0.2 and
-                    abs(abs(x[2]) - 0.0) < 0.2
-                    ):
+                    abs(abs(x[1]) - abs(target_x[1])) < 0.2 and
+                    abs(abs(x[2]) - abs(target_x[2])) < 0.2
+                    ) or elapsed_time >= swing_time:
 
                 fsm.SetAtIndex(0, UP_BALANCE)
                 fsm.SetAtIndex(1, time)

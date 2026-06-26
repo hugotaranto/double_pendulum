@@ -115,8 +115,8 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
     # target_time = 2.3
     # num_time_steps = 200
 
-    target_time = 4.0
-    num_time_steps = 250
+    target_time = 3.5
+    num_time_steps = 500
 
     time_step = target_time / num_time_steps
 
@@ -138,7 +138,7 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
     dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] >= -0.4)
 
     # actuation limits
-    # dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= 1.5)
+    dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= 2.5)
 
     dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
 
@@ -147,8 +147,8 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
 
     # slow down the swing speed
     state = dirtran.state()
-    # dirtran.AddRunningCost(2.0 * state[4]**2)
-    # dirtran.AddRunningCost(2.0 * state[5]**2)
+    dirtran.AddRunningCost(0.5 * state[4]**2)
+    dirtran.AddRunningCost(0.5 * state[5]**2)
     # dirtran.AddRunningCost(5.0 * state[0]**2)
     # dirtran.AddRunningCost(1.0 * state[2]**2)
 
@@ -173,7 +173,8 @@ def direct_transcription(plant, initial_state, final_state, keyframe_file=None):
         data = np.load(keyframe_file)
         keyframes = data["keyframes"].T
         # times = data["times"]
-        times = [0, 0.5, 1, 1.7, 2.4]
+        # times = [0, 0.5, 1, 1.7, 2.4]
+        times = np.linspace(0, target_time, len(data["keyframes"]))
     else:
         times = [0.0, target_time]
         keyframes = np.column_stack((initial_state, final_state))
@@ -388,7 +389,7 @@ def tvlqr(x_trajectory, u_trajectory, plant):
     return tvlqr.K
 
 
-def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
+def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state):
 
     plant, builder, scene_graph = get_diagram()
 
@@ -402,9 +403,12 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
     tvlqr_controller = builder.AddNamedSystem("tvlqr_controller", 
                                               TVLQRController(K_traj=tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory))
 
+    swing_time = builder.AddSystem(ConstantVectorSource([x_trajectory.end_time()]))
+    
     # connect each controller to the selector
     builder.Connect(lqr_controller.get_output_port(), selector_controller.up_up_balance)
     builder.Connect(tvlqr_controller.get_output_port(), selector_controller.swing_up)
+    builder.Connect(swing_time.get_output_port(), selector_controller.swing_time)
 
     # connect the state of the plant to each controller
     builder.Connect(plant.get_state_output_port(), selector_controller.state_port)
@@ -412,8 +416,9 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
     builder.Connect(plant.get_state_output_port(), tvlqr_controller.state_port)
 
     # set the desired state for the lqr controller
-    desired_state = builder.AddSystem(ConstantVectorSource([0, np.pi, 0, 0, 0, 0]))
+    desired_state = builder.AddSystem(ConstantVectorSource(target_state))
     builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
+    builder.Connect(desired_state.get_output_port(), selector_controller.target)
 
     # connect the selector to the actuator
     builder.Connect(selector_controller.get_output_port(0), plant.get_actuation_input_port())
@@ -442,7 +447,23 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory):
     joint.set_translation(plant_context, 0.0)
     joint.set_translation_rate(plant_context, 0.0)
 
-    simulator.AdvanceTo(20.0)
+    simulator.AdvanceTo(10.0)
+
+
+def time_cut(x_traj, u_traj, time_cut, num_samples=300):
+    times = np.linspace(0, time_cut, num_samples)
+
+    states = []
+    inputs = []
+
+    for time in times:
+        states.append(x_traj.value(time))
+        inputs.append(u_traj.value(time))
+
+    x_trajectory = PiecewisePolynomial.FirstOrderHold(times, states)
+    u_trajectory = PiecewisePolynomial.FirstOrderHold(times, inputs)
+
+    return x_trajectory, u_trajectory
 
 if __name__ == "__main__":
 
@@ -456,17 +477,42 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
+    initial_state = STATE_DICT["00"]
+    target_state = STATE_DICT["10"]
+
     # test direct transcription
     x_traj, u_traj = direct_transcription(plant,
-                                                      initial_state=STATE_DICT["00"],
-                                                      final_state=STATE_DICT["11"],
-                                                      keyframe_file=None)
+                                          initial_state=initial_state,
+                                          final_state=target_state,
+                                          keyframe_file="./keyframes/00_10_2.npz")
+
 
     animate_trajectory(x_traj, speed=0.5)
+    x_trajectory, u_trajectory = time_cut(x_traj, u_traj, 2.65)
 
-    x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
-                                                    STATE_DICT["11"], threshold=0.1,
-                                                    num_samples=200, idxs=[1, 2])
+    lqr_K = lqr(plant, target_state)
+    tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+
+    # animate the full system
+    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state)
+
+    # while(1):
+    #
+    #     thresh = input("Threshold input: ")
+    #     try:
+    #         thresh = float(thresh)
+    #     except:
+    #         continue
+    #
+    #     x_trajectory, u_trajectory = time_cut(x_traj, u_traj, thresh)
+    #
+    #     lqr_K = lqr(plant, target_state)
+    #
+    #     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+    #     animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=initial_state)
+    #
+    #     animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
+    #                         u_trajectory=u_trajectory, target_state=target_state)
 
     # while(1):
     #     text = input("Enter threshold ('exit' to quit): ")
@@ -489,9 +535,11 @@ if __name__ == "__main__":
     #     except:
     #         continue
     #
-    #     x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
-    #                                                     STATE_DICT["11"], threshold=threshold,
-    #                                                     num_samples=200, idxs=indices_int)
+    #     # x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
+    #     #                                                 target_state, threshold=threshold,
+    #     #                                                 num_samples=200, idxs=indices_int)
+    #
+    #     x_trajectory, u_trajectory = time_cut(x_traj, u_traj, threshold)
     #
     #     animate_trajectory(x_trajectory)
     #
@@ -499,21 +547,7 @@ if __name__ == "__main__":
     #
     #     if do_next == "y":
     #         tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    #         animate_tvlqr(tvlqr_K, x_trajectory, u_trajectory, initial_state=STATE_DICT["00"])
+    #         animate_tvlqr(tvlqr_K, x_trajectory, u_trajectory, initial_state=initial_state)
     #     else:
     #         continue
-    #
-    # print("")
-    # print(x_trajectory.start_time())
-
-    # print(x_trajectory.end_time())
-    #
-
-    lqr_K = lqr(plant, STATE_DICT["11"])
-
-    tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=STATE_DICT["00"])
-
-    animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory, u_trajectory=u_trajectory)
-
 
