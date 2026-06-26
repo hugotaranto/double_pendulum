@@ -135,7 +135,12 @@ def direct_transcription(plant, initial_state, final_state, params):
     # actuation limits
     dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= params[TranscriptionParams.ACTUATION_CONSTRAINT.value])
 
-    dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
+    idxs = params[TranscriptionParams.CONSTRAINT_IDXS.value]
+    if idxs is None:
+        dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
+    else:
+        for i in idxs:
+            dirtran.prog().AddBoundingBoxConstraint(final_state[i], final_state[i], dirtran.final_state()[i])
 
     u = dirtran.input()[0]
     dirtran.AddRunningCost(params[TranscriptionParams.INPUT_COST.value] * u**2)
@@ -364,7 +369,7 @@ def tvlqr(x_trajectory, u_trajectory, plant):
     return tvlqr.K
 
 
-def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state):
+def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state, initial_state):
 
     plant, builder, scene_graph = get_diagram()
 
@@ -411,11 +416,11 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state
 
     # set the initial positions
     joint = plant.GetJointByName("shoulder")
-    joint.set_angle(plant_context, 0.0)
+    joint.set_angle(plant_context, initial_state[1])
     joint.set_angular_rate(plant_context, 0.0)
 
     joint = plant.GetJointByName("elbow")
-    joint.set_angle(plant_context, 0.0)
+    joint.set_angle(plant_context, initial_state[2])
     joint.set_angular_rate(plant_context, 0.0)
 
     joint = plant.GetJointByName("slider_joint")
@@ -440,19 +445,47 @@ def time_cut(x_traj, u_traj, time_cut, num_samples=300):
 
     return x_trajectory, u_trajectory
 
-if __name__ == "__main__":
+def test_trajectories(transition):
 
-    # start the meshcat server and wait until there is a connection
-    meshcat = StartMeshcat()
-    while meshcat.GetNumActiveConnections() == 0:
-        print(meshcat.GetNumActiveConnections(), "Connections")
-        time.sleep(1)
+    transcription_params = TRANSCRIPTION_PARAMS[transition]
+    states = transition.split("_")
+    initial_state = STATE_DICT[states[0]]
+    goal_state = STATE_DICT[states[1]]
 
-    time.sleep(1)
-    print("Simulating...")
-    plant = get_plant()
+    # test direct transcription
+    x_traj, u_traj = direct_transcription(plant,
+                                          initial_state=initial_state,
+                                          final_state=goal_state,
+                                          params=transcription_params)
 
-    transition = "00_10"
+    animate_trajectory(x_traj, speed=0.5)
+
+    while(1):
+
+        thresh = input("Threshold input: ")
+        try:
+            thresh = float(thresh)
+        except:
+            continue
+
+        x_trajectory, u_trajectory = time_cut(x_traj, u_traj, thresh)
+
+        animate_trajectory(x_trajectory, speed=0.5)
+
+        text = input("Go again? (y/n): ")
+
+        if text == "y":
+            continue
+
+        lqr_K = lqr(plant, goal_state)
+
+        tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+        animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=initial_state)
+
+        animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
+                            u_trajectory=u_trajectory, target_state=goal_state, initial_state=initial_state)
+
+def test_full_system(transition):
 
     transcription_params = TRANSCRIPTION_PARAMS[transition]
     states = transition.split("_")
@@ -469,75 +502,22 @@ if __name__ == "__main__":
                                           transcription_params[TranscriptionParams.TIME_CUTOFF.value])
 
     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, goal_state)
+    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, goal_state, initial_state)
 
-    # test direct transcription
-    # x_traj, u_traj = direct_transcription(plant,
-    #                                       initial_state=initial_state,
-    #                                       final_state=goal_state,
-    #                                       params=transcription_params)
-    #
-    # animate_trajectory(x_traj, speed=0.5)
-    #
-    # while(1):
-    #
-    #     thresh = input("Threshold input: ")
-    #     try:
-    #         thresh = float(thresh)
-    #     except:
-    #         continue
-    #
-    #     x_trajectory, u_trajectory = time_cut(x_traj, u_traj, thresh)
-    #
-    #     animate_trajectory(x_trajectory, speed=0.5)
-    #
-    #     text = input("Go again? (y/n): ")
-    #
-    #     if text == "y":
-    #         continue
-    #
-    #     lqr_K = lqr(plant, goal_state)
-    #
-    #     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    #     animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=initial_state)
-    #
-    #     animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
-    #                         u_trajectory=u_trajectory, target_state=goal_state)
+if __name__ == "__main__":
 
-    # while(1):
-    #     text = input("Enter threshold ('exit' to quit): ")
-    #
-    #     if text == "exit":
-    #         break
-    #
-    #     try:
-    #         threshold = float(text)
-    #     except:
-    #         continue
-    #
-    #     indices = input("Enter indices: ")
-    #
-    #     try:
-    #         indices = indices.split(" ")
-    #         indices_int = []
-    #         for indice in indices:
-    #             indices_int.append(int(indice))
-    #     except:
-    #         continue
-    #
-    #     # x_trajectory, u_trajectory = trajectory_cleanup(x_traj, u_traj,
-    #     #                                                 target_state, threshold=threshold,
-    #     #                                                 num_samples=200, idxs=indices_int)
-    #
-    #     x_trajectory, u_trajectory = time_cut(x_traj, u_traj, threshold)
-    #
-    #     animate_trajectory(x_trajectory)
-    #
-    #     do_next = input("Do the tvlqr (y/n): ")
-    #
-    #     if do_next == "y":
-    #         tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    #         animate_tvlqr(tvlqr_K, x_trajectory, u_trajectory, initial_state=initial_state)
-    #     else:
-    #         continue
+    # start the meshcat server and wait until there is a connection
+    meshcat = StartMeshcat()
+    while meshcat.GetNumActiveConnections() == 0:
+        print(meshcat.GetNumActiveConnections(), "Connections")
+        time.sleep(1)
+
+    time.sleep(1)
+    print("Simulating...")
+    plant = get_plant()
+
+    transition = "01_00"
+    test_trajectories(transition)
+    # test_full_system(transition)
+
 

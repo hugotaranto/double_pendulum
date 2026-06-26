@@ -55,7 +55,7 @@ class SelectorController(LeafSystem):
         elapsed_time = time - mode_start_time
 
         if mode == DOWN_BALANCE:
-            if elapsed_time >= 1:
+            if elapsed_time >= 0.01:
                 # mode = SWING_UP
                 print("Switching to swing up")
                 fsm.SetAtIndex(0, SWING_UP)
