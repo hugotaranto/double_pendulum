@@ -150,6 +150,9 @@ def direct_transcription(plant, initial_state, final_state, params):
     dirtran.AddRunningCost(params[TranscriptionParams.SHOULDER_VELOCITY_COST.value] * state[4]**2)
     dirtran.AddRunningCost(params[TranscriptionParams.ELBOW_VELOCITY_COST.value] * state[5]**2)
 
+    # dirtran.AddRunningCost(1.0 * sym.abs(final_state[2] - state[2])**2)
+    # dirtran.AddRunningCost(2.0 * state[2]**2)
+
     keyframe_file = params[TranscriptionParams.KEY_FRAME_FILE.value]
 
     if keyframe_file is not None:
@@ -288,7 +291,7 @@ def animate_lqr(K, state, disturbance=0.1):
     simulator.AdvanceTo(7.0)
 
 
-def animate_tvlqr(K, x_traj, u_traj, initial_state):
+def animate_tvlqr(K, x_traj, u_traj, initial_state, speed=1.0):
 
     plant, builder, scene_graph = get_diagram()
     # add the tvlqr controller
@@ -309,7 +312,7 @@ def animate_tvlqr(K, x_traj, u_traj, initial_state):
     diagram = builder.Build()
     simulator = Simulator(diagram)
 
-    simulator.set_target_realtime_rate(1.0)
+    simulator.set_target_realtime_rate(speed)
 
     # uncomment these to set initial state
     context = simulator.get_mutable_context()
@@ -480,7 +483,13 @@ def test_trajectories(transition):
         lqr_K = lqr(plant, goal_state)
 
         tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-        animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, initial_state=initial_state)
+        animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, 
+                      initial_state=initial_state, speed=0.2)
+
+        text = input("Do full animation? (y/n): ")
+
+        if text == "n":
+            continue
 
         animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
                             u_trajectory=u_trajectory, target_state=goal_state, initial_state=initial_state)
@@ -516,7 +525,7 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    transition = "01_00"
+    transition = "10_01"
     test_trajectories(transition)
     # test_full_system(transition)
 
