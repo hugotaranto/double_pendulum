@@ -532,12 +532,12 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    # transition = "01_11"
-    # test_trajectories(transition)
+    transition = "10_00"
+    test_trajectories(transition)
 
-    transitions = TRANSCRIPTION_PARAMS.keys()
-    for transition in transitions:
-        print("-=-=-=-=-=-=-=-=-=-=-=-=- Testing Transition:", transition, "-=-=-=-=-=-=-\n")
-        test_full_system(transition)
+    # transitions = TRANSCRIPTION_PARAMS.keys()
+    # for transition in transitions:
+    #     print("-=-=-=-=-=-=-=-=-=-=-=-=- Testing Transition:", transition, "-=-=-=-=-=-=-\n")
+    #     test_full_system(transition)
 
 
