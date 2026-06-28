@@ -347,67 +347,78 @@ def tvlqr(x_trajectory, u_trajectory, plant):
     return tvlqr.K
 
 def simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00"):
-    plant, builder, scene_graph = get_diagram()
 
-    # add the controller
-    controller = builder.AddNamedSystem("Controller",
-                                        SelectorController(initial_state, lqr_gains,
-                                                           tvlqr_gains, STATE_DICT))
-
-    # connect the plant to the controller
-    builder.Connect(controller.get_output_port(0), plant.get_actuation_input_port())
-    builder.Connect(plant.get_state_output_port(), controller.state_port)
-
-    MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
-
-    diagram = builder.Build()
-    simulator = Simulator(diagram)
-
-    simulator.set_target_realtime_rate(1.0)
-    context = simulator.get_mutable_context()
-
-    plant_context = plant.GetMyContextFromRoot(context)
-    init_vec = STATE_DICT[initial_state]
-
-    # set the initial positions
-    joint = plant.GetJointByName("shoulder")
-    joint.set_angle(plant_context, init_vec[1])
-    joint.set_angular_rate(plant_context, 0.0)
-
-    joint = plant.GetJointByName("elbow")
-    joint.set_angle(plant_context, init_vec[2])
-    joint.set_angular_rate(plant_context, 0.0)
-
-    joint = plant.GetJointByName("slider_joint")
-    joint.set_translation(plant_context, 0.0)
-    joint.set_translation_rate(plant_context, 0.0)
-
-    # Add in control buttons
-    meshcat.AddButton("00")
-    meshcat.AddButton("01")
-    meshcat.AddButton("10")
-    meshcat.AddButton("11")
-    last_00 = 0
-    last_01 = 0
-    last_10 = 0
-    last_11 = 0
-
-    dt = 0.2
     while 1:
-        if meshcat.GetButtonClicks("00") > last_00:
-            controller.SetTargetState("00")
-            last_00 += 1
-        elif meshcat.GetButtonClicks("01") > last_01:
-            controller.SetTargetState("01")
-            last_01 += 1
-        elif meshcat.GetButtonClicks("10") > last_10:
-            controller.SetTargetState("10")
-            last_10 += 1
-        elif meshcat.GetButtonClicks("11") > last_11:
-            controller.SetTargetState("11")
-            last_11 += 1
+        plant, builder, scene_graph = get_diagram()
 
-        simulator.AdvanceTo(simulator.get_context().get_time() + dt)
+        # add the controller
+        controller = builder.AddNamedSystem("Controller",
+                                            SelectorController(initial_state, lqr_gains,
+                                                               tvlqr_gains, STATE_DICT))
+
+        # connect the plant to the controller
+        builder.Connect(controller.get_output_port(0), plant.get_actuation_input_port())
+        builder.Connect(plant.get_state_output_port(), controller.state_port)
+
+        MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
+
+        diagram = builder.Build()
+        simulator = Simulator(diagram)
+
+        simulator.set_target_realtime_rate(1.0)
+        context = simulator.get_mutable_context()
+
+        plant_context = plant.GetMyContextFromRoot(context)
+        init_vec = STATE_DICT[initial_state]
+
+        # set the initial positions
+        joint = plant.GetJointByName("shoulder")
+        joint.set_angle(plant_context, init_vec[1])
+        joint.set_angular_rate(plant_context, 0.0)
+
+        joint = plant.GetJointByName("elbow")
+        joint.set_angle(plant_context, init_vec[2])
+        joint.set_angular_rate(plant_context, 0.0)
+
+        joint = plant.GetJointByName("slider_joint")
+        joint.set_translation(plant_context, 0.0)
+        joint.set_translation_rate(plant_context, 0.0)
+
+        # Add in control buttons
+        meshcat.AddButton("00")
+        meshcat.AddButton("01")
+        meshcat.AddButton("10")
+        meshcat.AddButton("11")
+        meshcat.AddButton("Reset")
+        meshcat.AddButton("Quit")
+        last_00 = 0
+        last_01 = 0
+        last_10 = 0
+        last_11 = 0
+        last_reset = 0
+        last_quit = 0
+
+        dt = 0.2
+        while 1:
+            if meshcat.GetButtonClicks("Quit") > last_quit:
+                return
+            elif meshcat.GetButtonClicks("Reset") > last_reset:
+                break
+            elif meshcat.GetButtonClicks("00") > last_00:
+                controller.SetTargetState("00")
+                last_00 += 1
+            elif meshcat.GetButtonClicks("01") > last_01:
+                controller.SetTargetState("01")
+                last_01 += 1
+            elif meshcat.GetButtonClicks("10") > last_10:
+                controller.SetTargetState("10")
+                last_10 += 1
+            elif meshcat.GetButtonClicks("11") > last_11:
+                controller.SetTargetState("11")
+                last_11 += 1
+
+            simulator.AdvanceTo(simulator.get_context().get_time() + dt)
+
 
 def time_cut(x_traj, u_traj, time_cut, num_samples=300):
     times = np.linspace(0, time_cut, num_samples)
@@ -586,13 +597,13 @@ if __name__ == "__main__":
     # -=-=-=-=-= simulate the full system -=-=-=-=-=
 
     # first load the gains
-    lqr_gains = load_pickle(LQR_FILE)
-    tvlqr_gains = load_pickle(TVLQR_FILE)
-
-    # then simulate!
-    simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00")
+    # lqr_gains = load_pickle(LQR_FILE)
+    # tvlqr_gains = load_pickle(TVLQR_FILE)
+    #
+    # # then simulate!
+    # simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00")
 
 
     # -=-=-=-=-=-=- Test single transition (Used for creating trajectories) -=-=-=-=-=-=-
 
-    # test_trajectories("00_01")
+    test_trajectories("10_11")
