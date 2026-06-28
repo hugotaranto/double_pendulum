@@ -525,7 +525,7 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    transition = "10_11"
+    transition = "11_01"
     test_trajectories(transition)
     # test_full_system(transition)
 

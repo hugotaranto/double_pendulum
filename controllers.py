@@ -63,10 +63,11 @@ class SelectorController(LeafSystem):
         elif mode == SWING_UP:
             # check if the goal state has been reached
 
-            if (
-                    abs(abs(x[1]) - abs(target_x[1])) < 0.2 and
-                    abs(abs(x[2]) - abs(target_x[2])) < 0.2
-                    ) or elapsed_time >= swing_time:
+            # if (
+            #         abs(abs(x[1]) - abs(target_x[1])) < 0.2 and
+            #         abs(abs(x[2]) - abs(target_x[2])) < 0.2
+            #         ) or elapsed_time >= swing_time:
+            if (elapsed_time >= swing_time):
 
                 fsm.SetAtIndex(0, UP_BALANCE)
                 fsm.SetAtIndex(1, time)
