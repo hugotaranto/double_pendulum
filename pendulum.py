@@ -532,7 +532,7 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    transition = "10_00"
+    transition = "11_00"
     test_trajectories(transition)
 
     # transitions = TRANSCRIPTION_PARAMS.keys()
