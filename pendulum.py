@@ -21,6 +21,8 @@ from pydrake.all import (
 
 import time
 import sys
+import pickle
+from pathlib import Path
 from controllers import *
 
 def get_plant(file="./sliding_double_pendulum.urdf"):
@@ -74,40 +76,6 @@ def animate_trajectory(x_trajectory, speed=1.0):
         sim_time += dt_sim
 
 
-def trajectory_cleanup(x_trajectory, u_trajectory, goal_state, threshold, num_samples, idxs=[1, 2, 4, 5]):
-
-    goal_state = np.asarray(goal_state)
-
-    # Sample trajectory densely
-    times = np.linspace(x_trajectory.start_time(),
-                         x_trajectory.end_time(), num_samples)
-
-    X = np.column_stack([x_trajectory.value(t).flatten() for t in times])
-    U = np.column_stack([u_trajectory.value(t).flatten() for t in times])
-
-    # Find last index where NOT close to goal
-    last_bad_idx = 0
-
-    for i in reversed(range(num_samples)):
-        error = np.abs(X[idxs, i] - goal_state[idxs])
-
-        if np.any(error > threshold):
-            last_bad_idx = i
-            break
-
-    # Keep everything up to that point (+ a small buffer)
-    last_idx = min(last_bad_idx + 10, num_samples - 1)
-
-    times_cut = times[:last_idx + 1]
-    X_cut = X[:, :last_idx + 1]
-    U_cut = U[:, :last_idx + 1]
-
-    # Rebuild trajectories
-    x_trimmed = PiecewisePolynomial.FirstOrderHold(times_cut, X_cut)
-    u_trimmed = PiecewisePolynomial.FirstOrderHold(times_cut, U_cut)
-
-    return x_trimmed, u_trimmed
-
 def direct_transcription(plant, initial_state, final_state, params):
 
     context = plant.CreateDefaultContext()
@@ -142,6 +110,7 @@ def direct_transcription(plant, initial_state, final_state, params):
     # actuation limits
     dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= params[TranscriptionParams.ACTUATION_CONSTRAINT.value])
 
+    # final state constraint
     idxs = params[TranscriptionParams.CONSTRAINT_IDXS.value]
     if idxs is None:
         dirtran.prog().AddBoundingBoxConstraint(final_state, final_state, dirtran.final_state())
@@ -149,23 +118,23 @@ def direct_transcription(plant, initial_state, final_state, params):
         for i in idxs:
             dirtran.prog().AddBoundingBoxConstraint(final_state[i], final_state[i], dirtran.final_state()[i])
 
+    # input "actuation" cost
     u = dirtran.input()[0]
     dirtran.AddRunningCost(params[TranscriptionParams.INPUT_COST.value] * u**2)
 
-    # slow down the swing speed
+    # cost of rotational velocity of joints
     state = dirtran.state()
     dirtran.AddRunningCost(params[TranscriptionParams.SHOULDER_VELOCITY_COST.value] * state[4]**2)
     dirtran.AddRunningCost(params[TranscriptionParams.ELBOW_VELOCITY_COST.value] * state[5]**2)
 
-    # dirtran.AddRunningCost(1.0 * sym.abs(final_state[2] - state[2])**2)
-    # dirtran.AddRunningCost(2.0 * state[2]**2)
-
+    # load the keyframes in from file (I didn't end up using this)
     keyframe_file = params[TranscriptionParams.KEY_FRAME_FILE.value]
-
     if keyframe_file is not None:
         data = np.load(keyframe_file)
         keyframes = data["keyframes"].T
         times = np.linspace(0, target_time, len(data["keyframes"]))
+
+    # if no initial guess, just make linear guess from initial -> goal states
     else:
         times = [0.0, target_time]
         keyframes = np.column_stack((initial_state, final_state))
@@ -176,9 +145,9 @@ def direct_transcription(plant, initial_state, final_state, params):
     initial_x_trajectory = PiecewisePolynomial.FirstOrderHold(
             times, keyframes
     )
-
     dirtran.SetInitialTrajectory(PiecewisePolynomial(), initial_x_trajectory)
 
+    # compute the trajectory
     result = Solve(dirtran.prog())
     assert result.is_success()
 
@@ -321,7 +290,6 @@ def animate_tvlqr(K, x_traj, u_traj, initial_state, speed=1.0):
 
     simulator.set_target_realtime_rate(speed)
 
-    # uncomment these to set initial state
     context = simulator.get_mutable_context()
     plant_context = plant.GetMyContextFromRoot(context)
 
@@ -352,7 +320,7 @@ def tvlqr(x_trajectory, u_trajectory, plant):
 
     # define Q: the cost for each of the states
     Q = np.diag([
-        10,      # slider position
+        10,     # slider position
         100,    # angle of first link
         100,    # angle of second link
         1,      # velocity of slider
@@ -378,41 +346,17 @@ def tvlqr(x_trajectory, u_trajectory, plant):
 
     return tvlqr.K
 
-
-def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state, initial_state):
-
+def simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00"):
     plant, builder, scene_graph = get_diagram()
 
-    # add the selector controller
-    selector_controller = builder.AddNamedSystem("selector_controller", SelectorController())
+    # add the controller
+    controller = builder.AddNamedSystem("Controller",
+                                        SelectorController(initial_state, lqr_gains,
+                                                           tvlqr_gains, STATE_DICT))
 
-    # add the lqr controller
-    lqr_controller = builder.AddNamedSystem("lqr_controller", LQRController(lqr_K))
-
-    # add the tvlqr controller
-    tvlqr_controller = builder.AddNamedSystem("tvlqr_controller", 
-                                              TVLQRController(K_traj=tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory))
-
-    swing_time = builder.AddSystem(ConstantVectorSource([x_trajectory.end_time()]))
-    
-    # connect each controller to the selector
-    builder.Connect(lqr_controller.get_output_port(), selector_controller.up_up_balance)
-    builder.Connect(tvlqr_controller.get_output_port(), selector_controller.swing_up)
-    builder.Connect(swing_time.get_output_port(), selector_controller.swing_time)
-
-    # connect the state of the plant to each controller
-    builder.Connect(plant.get_state_output_port(), selector_controller.state_port)
-    builder.Connect(plant.get_state_output_port(), lqr_controller.state_port)
-    builder.Connect(plant.get_state_output_port(), tvlqr_controller.state_port)
-
-    # set the desired state for the lqr controller
-    desired_state = builder.AddSystem(ConstantVectorSource(target_state))
-    builder.Connect(desired_state.get_output_port(), lqr_controller.target_state_port)
-    builder.Connect(desired_state.get_output_port(), selector_controller.target)
-
-    # connect the selector to the actuator
-    builder.Connect(selector_controller.get_output_port(0), plant.get_actuation_input_port())
-    builder.Connect(selector_controller.get_output_port(1), tvlqr_controller.start_time)
+    # connect the plant to the controller
+    builder.Connect(controller.get_output_port(0), plant.get_actuation_input_port())
+    builder.Connect(plant.get_state_output_port(), controller.state_port)
 
     MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
 
@@ -423,22 +367,47 @@ def animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, target_state
     context = simulator.get_mutable_context()
 
     plant_context = plant.GetMyContextFromRoot(context)
+    init_vec = STATE_DICT[initial_state]
 
     # set the initial positions
     joint = plant.GetJointByName("shoulder")
-    joint.set_angle(plant_context, initial_state[1])
+    joint.set_angle(plant_context, init_vec[1])
     joint.set_angular_rate(plant_context, 0.0)
 
     joint = plant.GetJointByName("elbow")
-    joint.set_angle(plant_context, initial_state[2])
+    joint.set_angle(plant_context, init_vec[2])
     joint.set_angular_rate(plant_context, 0.0)
 
     joint = plant.GetJointByName("slider_joint")
     joint.set_translation(plant_context, 0.0)
     joint.set_translation_rate(plant_context, 0.0)
 
-    simulator.AdvanceTo(10.0)
+    # Add in control buttons
+    meshcat.AddButton("00")
+    meshcat.AddButton("01")
+    meshcat.AddButton("10")
+    meshcat.AddButton("11")
+    last_00 = 0
+    last_01 = 0
+    last_10 = 0
+    last_11 = 0
 
+    dt = 0.2
+    while 1:
+        if meshcat.GetButtonClicks("00") > last_00:
+            controller.SetTargetState("00")
+            last_00 += 1
+        elif meshcat.GetButtonClicks("01") > last_01:
+            controller.SetTargetState("01")
+            last_01 += 1
+        elif meshcat.GetButtonClicks("10") > last_10:
+            controller.SetTargetState("10")
+            last_10 += 1
+        elif meshcat.GetButtonClicks("11") > last_11:
+            controller.SetTargetState("11")
+            last_11 += 1
+
+        simulator.AdvanceTo(simulator.get_context().get_time() + dt)
 
 def time_cut(x_traj, u_traj, time_cut, num_samples=300):
     times = np.linspace(0, time_cut, num_samples)
@@ -457,10 +426,14 @@ def time_cut(x_traj, u_traj, time_cut, num_samples=300):
 
 def test_trajectories(transition):
 
+    plant = get_plant()
+
     transcription_params = TRANSCRIPTION_PARAMS[transition]
     states = transition.split("_")
     initial_state = STATE_DICT[states[0]]
     goal_state = STATE_DICT[states[1]]
+
+    lqr_gains = load_pickle(LQR_FILE)
 
     # test direct transcription
     x_traj, u_traj = direct_transcription(plant,
@@ -487,8 +460,6 @@ def test_trajectories(transition):
         if text == "y":
             continue
 
-        lqr_K = lqr(plant, goal_state)
-
         tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
         animate_tvlqr(tvlqr_K, x_traj=x_trajectory, u_traj=u_trajectory, 
                       initial_state=initial_state, speed=0.2)
@@ -498,17 +469,20 @@ def test_trajectories(transition):
         if text == "n":
             continue
 
-        animate_full_system(lqr_K=lqr_K, tvlqr_K=tvlqr_K, x_trajectory=x_trajectory,
-                            u_trajectory=u_trajectory, target_state=goal_state, initial_state=initial_state)
+        transition_set = {}
+        transition_set[transition] = (tvlqr_K, x_trajectory, u_trajectory)
+
+        simulate_full_system(lqr_gains, transition_set, states[0])
 
 def test_full_system(transition):
+
+    plant = get_plant()
 
     transcription_params = TRANSCRIPTION_PARAMS[transition]
     states = transition.split("_")
     initial_state = STATE_DICT[states[0]]
     goal_state = STATE_DICT[states[1]]
 
-    lqr_K = lqr(plant, goal_state)    
     x_trajectory, u_trajectory = direct_transcription(plant,
                                                       initial_state,
                                                       goal_state,
@@ -521,7 +495,74 @@ def test_full_system(transition):
                                               time_cutoff)
 
     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
-    animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, goal_state, initial_state)
+
+    transition_set = {}
+    transition_set[transition] = (tvlqr_K, x_trajectory, u_trajectory)
+
+    lqr_gains = load_pickle(LQR_FILE)
+    simulate_full_system(lqr_gains, transition_set, states[0])
+
+def compute_lqrs(plant, states, path=None):
+    gains = {}
+    for state_name in states:
+        state = STATE_DICT[state_name]
+
+        lqr_K = lqr(plant, state)
+
+        gains[state_name] = lqr_K
+
+    if path is not None:
+        save_pickle(gains, path)
+
+    return gains
+
+def compute_tvlqrs(plant, transitions, path=None):
+    gains = {}
+    count = 0
+    for transition in transitions:
+        transcription_params = TRANSCRIPTION_PARAMS[transition]
+        states = transition.split("_")
+        initial_state = STATE_DICT[states[0]]
+        goal_state = STATE_DICT[states[1]]
+        count += 1
+
+        print(f"Computing Transition: {transition} {count}/{len(transitions)}")
+
+        x_trajectory, u_trajectory = direct_transcription(plant,
+                                                          initial_state,
+                                                          goal_state,
+                                                          transcription_params)
+
+        time_cutoff = transcription_params[TranscriptionParams.TIME_CUTOFF.value]
+
+        if time_cutoff is not None:
+            x_trajectory, u_trajectory = time_cut(x_trajectory, u_trajectory,
+                                                  time_cutoff)
+
+        tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
+
+        gains[transition] = (tvlqr_K, x_trajectory, u_trajectory)
+
+    if path is not None:
+        save_pickle(gains, path)
+
+    return gains
+
+def save_pickle(obj, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("wb") as f:
+        pickle.dump(obj, f)
+
+def load_pickle(path):
+    path = Path(path)
+    assert path.exists()
+
+    with path.open("rb") as f:
+        data = pickle.load(f)
+
+    return data
 
 if __name__ == "__main__":
 
@@ -533,14 +574,25 @@ if __name__ == "__main__":
 
     time.sleep(1)
     print("Simulating...")
-    plant = get_plant()
+    # plant = get_plant()
 
-    transition = "11_01"
-    test_trajectories(transition)
-
+    # states = STATE_DICT.keys()
+    # lqrs = compute_lqrs(plant, states, LQR_FILE)
+    #
     # transitions = TRANSCRIPTION_PARAMS.keys()
-    # for transition in transitions:
-    #     print("-=-=-=-=-=-=-=-=-=-=-=-=- Testing Transition:", transition, "-=-=-=-=-=-=-\n")
-    #     test_full_system(transition)
+    # tvlqrs = compute_tvlqrs(plant, transitions, TVLQR_FILE)
 
 
+    # -=-=-=-=-= simulate the full system -=-=-=-=-=
+
+    # first load the gains
+    lqr_gains = load_pickle(LQR_FILE)
+    tvlqr_gains = load_pickle(TVLQR_FILE)
+
+    # then simulate!
+    simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00")
+
+
+    # -=-=-=-=-=-=- Test single transition (Used for creating trajectories) -=-=-=-=-=-=-
+
+    # test_trajectories("00_01")

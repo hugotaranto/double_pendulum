@@ -1,11 +1,10 @@
 import numpy as np
 from enum import Enum
 
-DOWN_BALANCE = 0
-SWING_UP = 1
-UP_BALANCE = 2
-SWING_DOWN = 3
+BALANCE = 0
+TRANSITION = 1
 
+# all equilibrium states of double pendulum
 STATE_DICT = {
         "00" : (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         "01" : (0.0, 0.0, np.pi, 0.0, 0.0, 0.0),
@@ -13,6 +12,7 @@ STATE_DICT = {
         "11" : (0.0, np.pi, 0.0, 0.0, 0.0, 0.0),
 }
 
+# Enum specifying the indices in TRANSCRIPTION_PARAMS
 class TranscriptionParams(Enum):
     TARGET_TIME = 0
     NUM_TIME_STEPS = 1
@@ -25,6 +25,8 @@ class TranscriptionParams(Enum):
     FINISH_POSE = 8
     KEY_FRAME_FILE = 9
 
+# params used in direct transcription trajectory optimisation
+# (each pose in tuple explained in enum above ^)
 TRANSCRIPTION_PARAMS = {
         "00_01" : (0.6, 200, 1.0, 1.5, 1.5, 20.0, 0.59, [1, 2, 4, 5], None, None),
         "00_10" : (4.0, 300, 1.0, 1.5, 1.5, 50.0, 1.95, None, None, None),
@@ -40,3 +42,5 @@ TRANSCRIPTION_PARAMS = {
         "11_10" : (0.8, 300, 0.5, 0.5, 5.5, 50.0, 0.797, [1, 2, 3, 4], 0.2, None),
 }
 
+LQR_FILE = "./gains/lqrs.pkl"
+TVLQR_FILE = "./gains/tvlqrs.pkl"

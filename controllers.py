@@ -6,106 +6,120 @@ from pydrake.all import (
 from constants import *
 
 class SelectorController(LeafSystem):
-    def __init__(self):
+    def __init__(self, initial_state, lqr_gains, tvlqr_gains, state_dict):
         super().__init__()
 
-        self.state_port = self.DeclareVectorInputPort(name="estimated_state", size=6)
-        self.swing_up = self.DeclareVectorInputPort(name="swing_up", size=1)
-        self.up_up_balance = self.DeclareVectorInputPort(name="up_up_balance", size=1)
-        self.target = self.DeclareVectorInputPort(name="target", size=6)
-        self.swing_time = self.DeclareVectorInputPort(name="swing_time", size=1)
+        self.current_equilibrium = initial_state
+        self.target_equilibrium = initial_state
+        self.state_dict = state_dict
+        self.lqr_gains = lqr_gains
+        self.tvlqr_gains = tvlqr_gains
+        self.transition = None
 
+        self.state_port = self.DeclareVectorInputPort(name="estimated_state", size=6)
         self.fsm_state = self.DeclareDiscreteState(2)   # the current state of the system and time
 
         self.DeclareVectorOutputPort(name="actuation",
                                      size=1,
                                      calc=self.CalcOutput)
 
-        self.DeclareVectorOutputPort("tvlqr_time",
-                                     1,
-                                     self.UpdateTVLQRTime,
-                                     {self.all_state_ticket()})
-
         # periodic function call to update the state
         self.DeclarePeriodicDiscreteUpdateEvent(
-                period_sec=0.02,
+                period_sec=0.01,
                 offset_sec=0.0,
                 update=self.UpdateMode
         )
 
-    def UpdateTVLQRTime(self, context, output):
-
-        fsm = context.get_discrete_state(self.fsm_state).get_value()
-        start_time = fsm[1]
-
-        output.SetFromVector([start_time])
+    def SetTargetState(self, target_state):
+        self.target_equilibrium = target_state
 
     def UpdateMode(self, context, discrete_state):
-        x = self.state_port.Eval(context)
-        target_x = self.target.Eval(context)
-        swing_time = self.swing_time.Eval(context)
 
         # mode = discrete_state.get_mutable_vector().GetAtIndex(0)
-        # mode_start_time = discrete_state.get_mutable_vector().GetAtIndex(1)
+        # trans_start_time = discrete_state.get_mutable_vector().GetAtIndex(1)
         fsm = discrete_state.get_mutable_vector(self.fsm_state)
         mode = int(fsm.GetAtIndex(0))
         mode_start_time = fsm.GetAtIndex(1)
+
         time = context.get_time()
 
-        elapsed_time = time - mode_start_time
+        if (mode == BALANCE) and (self.target_equilibrium != self.current_equilibrium):
+            # request to transition
+            # may have to add a stability check in the future to
+            # make sure that it is currently balanced at initial state
+            transition = f"{self.current_equilibrium}_{self.target_equilibrium}"
 
-        if mode == DOWN_BALANCE:
-            if elapsed_time >= 0.01:
-                # mode = SWING_UP
-                print("Switching to swing up")
-                fsm.SetAtIndex(0, SWING_UP)
-                fsm.SetAtIndex(1, time)
-        elif mode == SWING_UP:
-            # check if the goal state has been reached
+            # check that the transition is in the tvlqr_gains
+            computed_transitions = self.tvlqr_gains.keys()
+            if transition not in computed_transitions:
+                print(f"Error: Transition trajectory '{transition}' not in tvlqr gain set!")
+                self.target_equilibrium = self.current_equilibrium
 
-            # if (
-            #         abs(abs(x[1]) - abs(target_x[1])) < 0.2 and
-            #         abs(abs(x[2]) - abs(target_x[2])) < 0.2
-            #         ) or elapsed_time >= swing_time:
-            if (elapsed_time >= swing_time):
-
-                fsm.SetAtIndex(0, UP_BALANCE)
+            else:
+                self.transition = f"{self.current_equilibrium}_{self.target_equilibrium}"
+                fsm.SetAtIndex(0, TRANSITION)
+                # set the start time of the transition
                 fsm.SetAtIndex(1, time)
 
-                print("Switching to up balance")
+        elif mode == TRANSITION:
+            transition_time = time - mode_start_time
+            trans_end_time = self.tvlqr_gains[self.transition][1].end_time()
 
-        elif mode == UP_BALANCE:
-            if elapsed_time >= 5:
-                fsm.SetAtIndex(0, SWING_DOWN)
+            # check if the transition time has elapsed
+            # TODO: add state check if necessary
+            if transition_time >= trans_end_time:
+                # transition finished
+                self.current_equilibrium = self.target_equilibrium
+                fsm.SetAtIndex(0, BALANCE)
                 fsm.SetAtIndex(1, time)
 
-                print("Switching to swing down")
-
-        elif mode == SWING_DOWN:
-
-            if(
-                abs(abs(x[1])) < 0.1 and
-                abs(abs(x[2])) < 0.1 and
-                abs(x[4]) < 0.5 and
-                abs(x[5]) < 0.5):
-
-                fsm.SetAtIndex(0, DOWN_BALANCE)
-                fsm.SetAtIndex(1, time)
-
-                print("Switching to down balance")
+        # if we get into a weird state, just balance for now
+        else:
+            fsm.SetAtIndex(0, BALANCE)
 
     def CalcOutput(self, context, output):
 
         fsm = context.get_discrete_state(self.fsm_state).get_value()
         mode = int(fsm[0])
+        mode_start_time = fsm[1]
+        x = self.state_port.Eval(context)
 
-        if mode == SWING_UP:
-            output.SetFromVector(self.swing_up.Eval(context))
-        elif mode == DOWN_BALANCE:
-            output.SetFromVector([0.0])
+        # if the current mode is balance, then draw the output from lqr controller
+        if mode == BALANCE:
+            target_state = self.state_dict[self.current_equilibrium]
+            lqr_K = self.lqr_gains[self.current_equilibrium]
+
+            force = self.lqr_controller(target_state, x, lqr_K)
+
+        # if current mode is transition, output from tvlqr controller
+        elif mode == TRANSITION:
+            current_time = context.get_time()
+            transition_time = current_time - mode_start_time
+            tvlqr_K = self.tvlqr_gains[self.transition]
+
+            force = self.tvlqr_controller(x, tvlqr_K, transition_time)
+        
+        # else we are in an unknown state
         else:
-            output.SetFromVector(self.up_up_balance.Eval(context))
+            force = 0.0
 
+        output.SetFromVector([force])
+
+    def lqr_controller(self, target_state, x, K):
+
+        u = -K @ (x - target_state)
+        return u
+
+    def tvlqr_controller(self, x, transition_trajectories, t):
+
+        K_traj, x_traj, u_traj = transition_trajectories
+
+        x_des = x_traj.value(t).flatten()
+        u_des = u_traj.value(t)[0]
+        K = K_traj.value(t)
+        u = u_des - K @ (x - x_des)
+
+        return u
 
 class TVLQRController(LeafSystem):
     def __init__(self, K_traj, x_traj, u_traj):
