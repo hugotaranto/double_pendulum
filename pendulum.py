@@ -527,8 +527,13 @@ def compute_lqrs(plant, states, path=None):
 
     return gains
 
-def compute_tvlqrs(plant, transitions, path=None):
-    gains = {}
+def compute_tvlqrs(plant, transitions, path=None, update=False):
+    if update:
+        assert path is not None
+        gains = load_pickle(path)
+    else:
+        gains = {}
+
     count = 0
     for transition in transitions:
         transcription_params = TRANSCRIPTION_PARAMS[transition]
@@ -585,7 +590,6 @@ if __name__ == "__main__":
 
     time.sleep(1)
     print("Simulating...")
-    # plant = get_plant()
 
     # states = STATE_DICT.keys()
     # lqrs = compute_lqrs(plant, states, LQR_FILE)
@@ -597,13 +601,17 @@ if __name__ == "__main__":
     # -=-=-=-=-= simulate the full system -=-=-=-=-=
 
     # first load the gains
-    # lqr_gains = load_pickle(LQR_FILE)
-    # tvlqr_gains = load_pickle(TVLQR_FILE)
-    #
-    # # then simulate!
-    # simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00")
+    lqr_gains = load_pickle(LQR_FILE)
+    tvlqr_gains = load_pickle(TVLQR_FILE)
+
+    # then simulate!
+    simulate_full_system(lqr_gains, tvlqr_gains, initial_state="00")
 
 
     # -=-=-=-=-=-=- Test single transition (Used for creating trajectories) -=-=-=-=-=-=-
 
-    test_trajectories("10_11")
+    # test_trajectories("01_11")
+
+    # plant = get_plant()
+    # compute_tvlqrs(plant, ["00_11"], path=TVLQR_FILE, update=True)
+
