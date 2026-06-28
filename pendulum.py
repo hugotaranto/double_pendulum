@@ -514,8 +514,11 @@ def test_full_system(transition):
                                                       goal_state,
                                                       transcription_params)
 
-    x_trajectory, u_trajectory = time_cut(x_trajectory, u_trajectory,
-                                          transcription_params[TranscriptionParams.TIME_CUTOFF.value])
+    time_cutoff = transcription_params[TranscriptionParams.TIME_CUTOFF.value]
+
+    if time_cutoff is not None:
+        x_trajectory, u_trajectory = time_cut(x_trajectory, u_trajectory,
+                                              time_cutoff)
 
     tvlqr_K = tvlqr(x_trajectory, u_trajectory, plant)
     animate_full_system(lqr_K, tvlqr_K, x_trajectory, u_trajectory, goal_state, initial_state)
@@ -532,7 +535,7 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    transition = "11_00"
+    transition = "11_01"
     test_trajectories(transition)
 
     # transitions = TRANSCRIPTION_PARAMS.keys()
