@@ -132,6 +132,13 @@ def direct_transcription(plant, initial_state, final_state, params):
     dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] <= 0.4)
     dirtran.AddConstraintToAllKnotPoints(dirtran.state()[0] >= -0.4)
 
+    # final slider position
+    final_pose_contraint = params[TranscriptionParams.FINISH_POSE.value]
+    if final_pose_contraint is not None:
+        dirtran.prog().AddBoundingBoxConstraint(-final_pose_contraint,
+                                                final_pose_contraint,
+                                                dirtran.final_state()[0])
+
     # actuation limits
     dirtran.AddConstraintToAllKnotPoints(sym.abs(dirtran.input()[0]) <= params[TranscriptionParams.ACTUATION_CONSTRAINT.value])
 
@@ -525,7 +532,7 @@ if __name__ == "__main__":
     print("Simulating...")
     plant = get_plant()
 
-    transition = "11_01"
+    transition = "11_10"
     test_trajectories(transition)
     # test_full_system(transition)
 
