@@ -6,6 +6,8 @@ Trajectory optimisation and optimal control of an underactuated sliding double p
 
 ## Demo
 
+https://github.com/user-attachments/assets/a059fd63-37a4-4ad3-8d1f-88dfa237b028
+
 ---
 
 ## Overview
@@ -20,35 +22,6 @@ The controller combines:
 - A high-level state machine that automatically switches between controllers
 
 The system is simulated using the **Drake MultibodyPlant** physics engine with real-time visualisation through **Meshcat**.
-
----
-
-## Control Architecture
-
-```
-                 Desired State
-                       │
-                       ▼
-              State Machine
-                       │
-         ┌─────────────┴─────────────┐
-         │                           │
-         ▼                           ▼
-Trajectory Available?          Already at Goal?
-         │                           │
-        Yes                         Yes
-         │                           │
-         ▼                           ▼
-      TVLQR Controller          LQR Controller
-         │                           │
-         └─────────────┬─────────────┘
-                       │
-                       ▼
-               Drake Simulation
-                       │
-                       ▼
-                Meshcat Visualisation
-```
 
 ---
 
