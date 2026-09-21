@@ -42,8 +42,17 @@
     <inertial>
       <origin xyz="0 0 -0.072" rpy="0 0 0" />
       <mass value="0.187" />
-      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" /> -->
+      <inertia
+          ixx="2.15946e-5"
+          ixy="0"
+          ixz="0"
+          iyy="4.41725e-4"
+          iyz="0"
+          izz="4.23247e-4"/>
+
     </inertial>
+
     <!-- Visualise the arm -->
     <visual>
       <origin xyz="0 0 -0.08225" rpy="0 0 0"></origin>
@@ -80,7 +89,15 @@
     <inertial>
       <origin xyz="0 0 -0.0665" rpy="0 0 0" />
       <mass value="0.132" />
-      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+      <!-- <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" /> -->
+      <inertia
+        ixx="1.375e-6"
+        ixy="0"
+        ixz="0"
+        iyy="1.94854e-4"
+        iyz="0"
+        izz="1.95679e-4"/>
+
     </inertial>
 
     <!-- Visualise the arm -->
