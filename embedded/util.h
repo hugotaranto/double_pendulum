@@ -44,6 +44,14 @@ void onFeedback(Get_Encoder_Estimates_msg_t &msg, void *user_data);
 void onCanFrame(uint32_t id, uint8_t len, const uint8_t *data);
 
 
+/* ---------------- Limit Switches ---------------- */
+
+extern volatile bool left_limit_hit;
+extern volatile bool right_limit_hit;
+
+void IRAM_ATTR rightLimitISR();
+void IRAM_ATTR leftLimitISR();
+
 /* ----------------- General Util ----------------- */
 
 void delayPump(int time_ms);

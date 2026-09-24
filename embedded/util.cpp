@@ -45,6 +45,20 @@ void onCanFrame(uint32_t id, uint8_t len, const uint8_t *data) {
 }
 
 
+/* ---------------- Limit Switches ---------------- */
+
+volatile bool left_limit_hit = false;
+volatile bool right_limit_hit = false;
+
+void IRAM_ATTR leftLimitISR() {
+  left_limit_hit = true;
+}
+
+void IRAM_ATTR rightLimitISR() {
+  right_limit_hit = true;
+}
+
+
 /* ----------------- General Util ----------------- */
 
 
