@@ -1,0 +1,125 @@
+<robot name="sliding_pendulum">
+
+  <!-- ==================== SLIDER ==================== -->
+
+  <link name="slider">
+    <inertial>
+      <origin xyz="0 0 0" />
+      <mass value="0.5"/>
+      <inertia
+        ixx="0"
+        ixy="0"
+        ixz="0"
+        iyy="0"
+        iyz="0"
+        izz="0" />
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+
+  <!-- ==================== SLIDER JOINT ==================== -->
+
+  <joint name="slider_joint" type="prismatic">
+    <parent link="world" />
+    <child link="slider" />
+
+    <!-- Slider moves along X -->
+    <axis xyz="1 0 0" />
+
+    <limit
+      lower="0.0"
+      upper="0.2"
+      effort="100"
+      velocity="1.0"/>
+  </joint>
+
+
+  <!-- ==================== PENDULUM ARM ==================== -->
+
+  <link name="arm">
+
+    <!-- Real mass properties from SolidWorks -->
+    <inertial>
+      <!-- COM relative to shoulder joint -->
+      <origin
+        xyz="0 -0.00745 -0.13140"
+        rpy="0 0 0" />
+
+      <mass value="0.04002" />
+
+      <!-- Inertia about COM, expressed in Coordinate System1 -->
+      <!-- Units: kg m^2 -->
+      <inertia
+        ixx="2.484765e-4"
+        ixy="0"
+        ixz="1e-11"
+        iyy="2.4957583e-4"
+        iyz="1.035595e-5"
+        izz="2.80138e-6" />
+    </inertial>
+
+    <!-- Visualise the arm -->
+    <visual>
+      <origin
+        xyz="0 0 -0.08225"
+        rpy="0 0 0"/>
+
+      <geometry>
+        <cylinder
+          length="0.1645"
+          radius="0.01"/>
+      </geometry>
+
+      <material name="green">
+        <color rgba="0 1.0 0 1"/>
+      </material>
+    </visual>
+
+    <!-- Visualise centre of mass -->
+    <visual>
+      <origin
+        xyz="0 -0.00745 -0.13140"
+        rpy="0 0 0"/>
+
+      <geometry>
+        <sphere radius="0.015"/>
+      </geometry>
+
+      <material name="red">
+        <color rgba="0.8 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+
+  </link>
+
+
+  <!-- ==================== SHOULDER JOINT ==================== -->
+
+  <joint name="shoulder" type="continuous">
+    <parent link="slider"/>
+    <child link="arm"/>
+
+    <!-- Rotation axis is the bearing shaft -->
+    <axis xyz="0 1 0"/>
+  </joint>
+
+
+  <!-- ==================== ACTUATOR ==================== -->
+
+  <transmission type="SimpleTransmission">
+    <actuator name="slider_motor" />
+    <joint name="slider_joint" />
+    <mechanicalReduction>1</mechanicalReduction>
+  </transmission>
+
+</robot>
