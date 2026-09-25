@@ -4,3 +4,4 @@ build
 embedded/sketch.yaml
 .clangd
 *.lua
+keyframes
