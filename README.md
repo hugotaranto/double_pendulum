@@ -123,3 +123,71 @@ This provides significantly better robustness to modelling error and disturbance
 
 - Russ Tedrake — *Underactuated Robotics*
 - Drake: Model-Based Design and Verification for Robotics
+
+
+# Double Pendulum — TODO
+
+## 1. Mechanical Parameters
+
+- [ ] Verify slider mass
+- [ ] Verify pendulum mass + COM
+- [ ] Verify pendulum inertia
+- [ ] Measure pulley pitch radius
+- [ ] Determine belt transmission ratio
+
+## 2. Motor Characterisation
+
+- [ ] Measure motor torque constant `Kt [Nm/A]`
+  - Use a known lever arm + force measurement
+  - `τ = F × r`
+  - `Kt = τ / Iq`
+- [ ] Test torque response over CAN
+  - Compare `Iq_setpoint` vs `Iq_measured`
+  - Check whether motor dynamics are fast enough to ignore
+
+## 3. Cart / Drive Characterisation
+
+- [ ] Measure breakaway/static friction
+- [ ] Measure friction at different velocities
+- [ ] Fit approximately:
+  - `F_f = Fc × sign(v) + b × v`
+- [ ] Measure belt slip limit
+- [ ] Determine practical maximum cart force
+
+## 4. Pendulum Bearing Friction
+
+- [ ] Measure breakaway torque
+- [ ] Perform free-swing/coast-down test
+- [ ] Estimate:
+  - Coulomb friction `τc`
+  - Viscous damping `bθ`
+
+## 5. Update Drake Model
+
+- [ ] Fix any incorrect masses/inertias
+- [ ] Add measured viscous damping
+- [ ] Don't initially model Coulomb friction in the linearisation
+- [ ] Add realistic position/force constraints to trajectory optimisation
+- [ ] Compare simulation against the real system
+
+## 6. Generate Controller
+
+- [ ] Linearise around upright equilibrium
+- [ ] Generate LQR / TVLQR gains
+- [ ] Check controllability and eigenvalues
+- [ ] Check required force against measured force limits
+
+## 7. Implement Real Controller
+
+```text
+LQR
+ ↓
+Cart force F
+ ↓
+Motor torque τ = F × r / η
+ ↓
+CAN Set_Input_Torque
+ ↓
+ODrive FOC
+ ↓
+Motor → pulley → belt → cart
