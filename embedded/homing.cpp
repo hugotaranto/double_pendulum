@@ -2,6 +2,7 @@
 
 int homePendulum(double &left_lim, double &right_lim, double &center_pose, float home_speed) {
 
+  Serial.println("Beginning Homing");
   // Homing sequence:
   // set to velocity control mode
   odrv0.setControllerMode(
@@ -12,6 +13,7 @@ int homePendulum(double &left_lim, double &right_lim, double &center_pose, float
   // wait for it to switch modes properly
   delay(100);
 
+  Serial.println("Homing to left");
   // home one way
   if (homeAxis(home_speed, left_lim) != 0) {
     // failed homing
@@ -19,6 +21,7 @@ int homePendulum(double &left_lim, double &right_lim, double &center_pose, float
     return -1;
   }
 
+  Serial.println("Homing to right");
   // home the other
   if (homeAxis(-home_speed, right_lim) != 0) {
     // failed homing
@@ -47,35 +50,22 @@ int homePendulum(double &left_lim, double &right_lim, double &center_pose, float
 
 int homeAxis(float home_speed, double &pose) {
 
-  Serial.println();
-  Serial.println("========================================");
-  debug_state("HOME START");
-  Serial.println("========================================");
 
   // Don't home if switch is already pressed
-  debug_state("Checking limit switches");
-
   if (digitalRead(LIM_SWITCH_L) == HIGH) {
-    debug_state("ERROR: Left limit switch already pressed");
+    Serial.println("Left switch already pressed");
     odrv0.setVelocity(0);
     return -1;
   }
 
   if (digitalRead(LIM_SWITCH_R) == HIGH) {
-    debug_state("ERROR: Right limit switch already pressed");
+    Serial.println("Right switch already pressed");
     odrv0.setVelocity(0);
     return -1;
   }
 
   // Start homing
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.print(" ms] Sending velocity = ");
-  Serial.println(home_speed);
-
   odrv0.setVelocity(home_speed);
-
-  debug_state("Homing started");
 
   // Wait for either switch
   unsigned long search_start = millis();
@@ -98,103 +88,47 @@ int homeAxis(float home_speed, double &pose) {
       odrv0.setVelocity(0);
       return -1;
     }
+    Serial.println("Waiting...");
 
-    delayPump(2);
-
-    // Print state every 100 ms
-    static unsigned long last_debug = 0;
-
-    if (millis() - last_debug >= 100) {
-      last_debug = millis();
-
-      Serial.print("[");
-      Serial.print(millis());
-      Serial.print(" ms] Searching");
-
-      Serial.print(" | L=");
-      Serial.print(digitalRead(LIM_SWITCH_L));
-
-      Serial.print(" R=");
-      Serial.print(digitalRead(LIM_SWITCH_R));
-
-      Serial.print(" | pos=");
-      Serial.print(odrv0_user_data.last_feedback.Pos_Estimate, 6);
-
-      Serial.print(" | elapsed=");
-      Serial.print(millis() - search_start);
-
-      Serial.println(" ms");
+    if (delayPump(2)) {
+      break;
     }
+
   }
 
   // A switch was hit
-  Serial.println();
-  debug_state("!!! SWITCH HIT !!!");
-
-  Serial.print("Search took ");
-  Serial.print(millis() - search_start);
-  Serial.println(" ms");
-
-  // Stop
-  debug_log("Sending velocity = 0");
+  Serial.println("Switch hit");
 
   odrv0.setVelocity(0);
 
-  debug_state("STOP command sent");
-
-  // Give the stop command some time while processing CAN
-  delayPump(10);
-
-  debug_state("After stop settling");
-
   // Record encoder position
-  debug_log("Getting encoder position");
+  odrv0_user_data.received_feedback = false;
+  odrv0.getFeedback(odrv0_user_data.last_feedback, 0);
 
-  odrv0.getFeedback(odrv0_user_data.last_feedback, 10);
+  if (waitForFeedback(2000) != 0) {
+    Serial.println("Failed to get feedback for pose");
+    return -1;
+  }
 
   pose = odrv0_user_data.last_feedback.Pos_Estimate;
 
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.print(" ms] Recorded pose = ");
-  Serial.println(pose, 6);
+  Serial.println("Backing off");
 
   // Back off
-  Serial.print("[");
-  Serial.print(millis());
-  Serial.print(" ms] Sending BACKOFF velocity = ");
-  Serial.println(-home_speed);
-
   odrv0.setVelocity(-home_speed);
 
-  debug_state("Backoff started");
-
   // Back off for 100 ms
-  unsigned long backoff_start = millis();
+  delayPump(200, false);
 
-  for (int i = 0; i < 100; i++) {
-    pumpEvents(can_intf);
-    delay(1);
+  Serial.println("Backed off");
 
-    if (millis() - backoff_start >= 50 &&
-        millis() - backoff_start < 51) {
-      debug_state("50 ms into backoff");
-    }
-  }
-
-  debug_state("Backoff finished");
-
-  // Stop
-  debug_log("Sending final velocity = 0");
+  // reset the lim switches
+  left_limit_hit = false;
+  right_limit_hit = false;
 
   odrv0.setVelocity(0);
-
   delayPump(10);
-
-  debug_state("HOME COMPLETE");
-
-  Serial.println("========================================");
-  Serial.println();
+  Serial.println("Axis Home complete\n\n");
 
   return 0;
 }
@@ -293,12 +227,6 @@ void calibrateTorque() {
       break;
     }
 
-    // Serial.print("Set: ");
-    // Serial.print(iq_msg.Iq_Setpoint, 4);
-    //
-    // Serial.print("  Measured: ");
-    // Serial.println(iq_msg.Iq_Measured, 4);
-
     iq_sum += iq_msg.Iq_Measured;
     if (data_count == NUM_SAMPLES - 1) {
 
@@ -344,5 +272,281 @@ void calibrateTorque() {
 
   odrv0.setTorque(0);
 
+}
+
+
+void staticFrictionTest(const float torque_step) {
+
+  delayPump(2000);
+
+  Serial.println("\n\nStarting Friction Test...");
+
+  pumpEvents(can_intf);
+
+  // put the xdrive into torque mode
+  odrv0.setControllerMode(CONTROL_MODE_TORQUE_CONTROL, INPUT_MODE_PASSTHROUGH);
+
+  odrv0.setTorque(0);
+
+  // wait for it to change
+  delayPump(100);
+
+  // check if the switches are currently pressed
+  if (digitalRead(17) == HIGH || digitalRead(18) == HIGH) {
+    Serial.println("Failed friction test: Lim switch already pressed!");
+    odrv0.setTorque(0);
+    return;
+  }
+
+  // reset the limit switches
+  right_limit_hit = false;
+  left_limit_hit = false;
+
+  odrv0_user_data.received_feedback = false;
+  odrv0.getFeedback(odrv0_user_data.last_feedback);
+
+  if (waitForFeedback(100) != 0) {
+    Serial.println("Failed friction test: could not get initial feedback");
+    odrv0.setTorque(0);
+    return;
+  }
+
+  float init_pose = odrv0_user_data.last_feedback.Pos_Estimate;
+
+  float torque_cmd = 0;
+  float max_torque = 0.5;
+
+  while(1) {
+
+    // check lim switches
+    if (right_limit_hit || left_limit_hit) {
+      Serial.println("Failed friction test: Limit switch hit");
+      break;
+    }
+
+    if (torque_cmd >= max_torque) {
+      Serial.println("Failed friction test: max torque exceeded");
+      break;
+    }
+
+    pumpEvents(can_intf);
+
+    // set the torque
+    odrv0.setTorque(torque_cmd);
+
+    // wait a bit
+    delayPump(20);
+
+    // get feedback from the motor
+    odrv0_user_data.received_feedback = false;
+    odrv0.getFeedback(odrv0_user_data.last_feedback);
+
+    if (waitForFeedback(20) != 0) {
+      Serial.println("Failed friction test: could not get feedback in loop");
+      odrv0.setTorque(0);
+      return;
+    }
+
+    // check if it has moved
+    if (abs(odrv0_user_data.last_feedback.Pos_Estimate - init_pose) > 0.01) {
+      Serial.print("Cart moved at torque: ");
+      Serial.println(torque_cmd, 3);
+      break;
+    }
+
+    // wait a bit between increasing torque
+    torque_cmd += torque_step;
+    Serial.print("Increasing torque to: ");
+    Serial.println(torque_cmd, 3);
+    Serial.print("\n\n");
+
+    // delayPump(1000);
+    delayPump(200);
+
+  }
+
+  odrv0.setTorque(0);
+
+}
+
+
+void kineticFrictionTest(const float start_torque, const float torque_step, int num_steps, const float torque_start, const float home_speed) {
+
+  // home the pendulum
+  double left_lim, right_lim, center_pose;
+  if (homePendulum(left_lim, right_lim, center_pose, home_speed) != 0) { 
+    Serial.println("Homing failed in friction test");
+    return;
+  }
+
+  delayPump(2000);
+
+  Serial.println("\n\nStarting Friction Test...");
+
+  pumpEvents(can_intf);
+
+  // put the xdrive into torque mode
+  odrv0.setControllerMode(CONTROL_MODE_TORQUE_CONTROL, INPUT_MODE_PASSTHROUGH);
+
+  odrv0.setTorque(0);
+
+  // wait for it to change
+  delayPump(100);
+
+  // check if the switches are currently pressed
+  if (digitalRead(17) == HIGH || digitalRead(18) == HIGH) {
+    Serial.println("Failed friction test: Lim switch already pressed!");
+    odrv0.setTorque(0);
+    return;
+  }
+
+  // reset the limit switches
+  right_limit_hit = false;
+  left_limit_hit = false;
+
+  odrv0_user_data.received_feedback = false;
+  odrv0.getFeedback(odrv0_user_data.last_feedback);
+
+  if (waitForFeedback(100) != 0) {
+    Serial.println("Failed friction test: could not get initial feedback");
+    odrv0.setTorque(0);
+    return;
+  }
+  
+  float torque_cmd = start_torque;
+
+  for(int i = 0; i < num_steps; i++) {
+
+    // stop the motor
+    odrv0.setTorque(0);
+
+    // check lim switches
+    if (left_limit_hit || right_limit_hit) {
+      Serial.println("Failed friction test: lims hit before starting torque step");
+    }
+
+    // Move back to left
+    odrv0.setControllerMode(
+        ODriveControlMode::CONTROL_MODE_POSITION_CONTROL,
+        ODriveInputMode::INPUT_MODE_PASSTHROUGH
+    );
+
+    if (delayPump(100)) {
+      odrv0.setTorque(0);
+      Serial.println("Failed friction test: Failed Delay");
+      return;
+    }
+
+    odrv0.setPosition(left_lim - 0.1);
+    if (waitForPose(left_lim - 0.1)) {
+      Serial.println("Failed friction test: Failed pose wait");
+      return;
+    }
+
+    Serial.print("Testing with torque: "); Serial.println(torque_cmd, 3);
+
+    // set the controller mode to torque
+    odrv0.setControllerMode(
+        ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL,
+        ODriveInputMode::INPUT_MODE_PASSTHROUGH
+    );
+
+    if (delayPump(50)) {
+      Serial.println("Failed friction test: Failed Delay");
+      odrv0.setTorque(0);
+      return;
+    }
+
+    // start the torque kickoff
+    Serial.println("Starting torque kickoff");
+    odrv0.setTorque(-torque_start);
+
+    if (delayPump(200)) {
+      odrv0.setTorque(0);
+      Serial.println("Failed friction test: Failed during torque kickoff");
+      return;
+    }
+
+    // change to actual torque now that static overcome
+    
+    // command the given torque
+    odrv0.setTorque(-torque_cmd);
+
+    if (delayPump(500)) {
+      odrv0.setTorque(0);
+      Serial.println("Failed friction test: Hit lim while waiting for vel steady");
+      return;
+    }
+
+    // increment the torque
+    torque_cmd += torque_step;
+
+    double vel_cum = 0;
+    double current_cum = 0;
+
+    int data_count = 0;
+
+    unsigned long start = millis();
+
+    while(abs(odrv0_user_data.last_feedback.Pos_Estimate - right_lim) >= 1.0) {
+
+      if ((millis() - start) > 10000) {
+        Serial.print("Timed out with torque: ");
+        Serial.println(torque_cmd);
+        break;
+      }
+
+      // check lim switches
+      if (left_limit_hit || right_limit_hit) {
+        odrv0.setTorque(0);
+        Serial.println("Failed friction test: Hit lim while recording vel");
+        return;
+      }
+      pumpEvents(can_intf);
+      // request feedback if we have received the last one
+      if (odrv0_user_data.received_feedback) {
+        odrv0_user_data.received_feedback = false;
+        odrv0.getFeedback(odrv0_user_data.last_feedback);
+        vel_cum += odrv0_user_data.last_feedback.Vel_Estimate;
+        data_count += 1;
+
+        Get_Iq_msg_t iq_msg;
+        if (!odrv0.getCurrents(iq_msg, 20)) {
+          odrv0.setTorque(0);
+          Serial.println("Failed to obtain current from motor");
+          break;
+        }
+
+        current_cum += iq_msg.Iq_Measured;
+      }
+
+      delay(1);
+    }
+
+    odrv0.setTorque(0);
+
+    if (data_count == 0) {
+      Serial.println("Failed friction test: Vel count = 0");
+      return;
+    }
+
+    Serial.print("Requested torque: "); Serial.println(torque_cmd);
+    Serial.print("Average Velocity: "); Serial.println(vel_cum / data_count);
+    Serial.print("Average Current: "); Serial.println(current_cum / data_count);
+    Serial.print("\n\n\n");
+
+  }
+
+  odrv0.setTorque(0);
+
+  // Set velocity to 0
+  odrv0.setControllerMode(
+      ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL,
+      ODriveInputMode::INPUT_MODE_PASSTHROUGH
+  );
+
+  delayPump(5);
+
+  odrv0.setVelocity(0);
 }
 

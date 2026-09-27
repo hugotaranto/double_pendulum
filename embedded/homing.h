@@ -16,4 +16,14 @@ int homeAxis(float home_speed, double &pose);
 // Then test multiple current commands and evaluate force applied to scale.
 void calibrateTorque();
 
+// Function to test cart static friction
+// Experimentally averaged breakaway friction with 0.05 Nm motor torque
+void staticFrictionTest(const float torque_step=0.01);
+
+// Function to test cart kinetic friction
+// results in excel
+// coulomb / kinetic friction = 0.0192 Nm
+// viscous friction b = 1.17 * 10^-3
+void kineticFrictionTest(const float start_torque, const float torque_step=0.1, int num_steps=5, const float torque_start=0.1, const float home_speed=2.0);
+
 #endif

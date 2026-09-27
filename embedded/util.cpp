@@ -70,7 +70,7 @@ void setupOdrive() {
   Serial.println("Found ODrive");
 
   // Serial.println("Waiting for motor to boot properly");
-  // delay(5000);
+  // delay(10000);
 
   // Request bus voltage/current (1s timeout)
   Serial.println("Attempting to read bus voltage and current");
@@ -118,28 +118,39 @@ void IRAM_ATTR rightLimitISR() {
 /* ----------------- General Util ----------------- */
 
 
-void delayPump(int time_ms) {
+int delayPump(int time_ms, bool check_lims) {
   unsigned long start = millis();
 
   while(millis() - start < time_ms) {
     pumpEvents(can_intf);
-    delay(2);
+
+    // check for the limit switches
+    if (check_lims && (left_limit_hit || right_limit_hit)) {
+      return -1;
+    }
+
+    delay(1);
   }
 
+  return 0;
 }
 
-void waitForPose(double pose, int timeout) {
+int waitForPose(double pose, int timeout) {
 
   unsigned long start = millis();
   while(abs(odrv0_user_data.last_feedback.Pos_Estimate - pose) > 0.05 && millis() - start < timeout) {
+    // check the limit switches
+    if (left_limit_hit || right_limit_hit) {
+      return -1;
+    }
     pumpEvents(can_intf);
     // update the position
     odrv0.getFeedback(odrv0_user_data.last_feedback);
-    delay(2);
+    delay(1);
   }
 
   // wait for the pose to fully complete
-  delayPump(20);
+  return delayPump(20);
 }
 
 int waitForFeedback(unsigned long timeout) {

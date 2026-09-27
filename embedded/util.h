@@ -57,8 +57,8 @@ void IRAM_ATTR leftLimitISR();
 
 /* ----------------- General Util ----------------- */
 
-void delayPump(int time_ms);
-void waitForPose(double pose, int timeout=10000);
+int delayPump(int time_ms, bool check_lims=true);
+int waitForPose(double pose, int timeout=10000);
 int waitForFeedback(unsigned long timeout=1000);
 
 /* ------------------ Debugging ------------------- */

@@ -58,22 +58,30 @@ void setup() {
   // setup the odrive
   setupOdrive();
 
-  // torque calibration test
-  calibrateTorque();
+  delayPump(500);
 
-  // Home the pendulum
-  // if (homePendulum(left_lim, right_lim, center_pose, HOME_SPEED) != 0) {
-  //   fault = true;
+  left_limit_hit = false;
+  right_limit_hit = false;
+
+  odrv0.setLimits(MOVEMENT_SPEED, 15.0);
+  delayPump(500);
+
+  // torque calibration test
+  // calibrateTorque();
+
+  // breakaway friction test
+  // while(!left_limit_hit && !right_limit_hit) {
+  //   staticFrictionTest(0.001);
+  //   delayPump(2000);
   // }
 
-  // switch to positional control
-  // odrv0.setControllerMode(
-  //     ODriveControlMode::CONTROL_MODE_POSITION_CONTROL,
-  //     ODriveInputMode::INPUT_MODE_PASSTHROUGH
-  // );
+  // kinetic friction test
+  // kineticFrictionTest(0.025, 0.001, 5, 0.05, HOME_SPEED);
 
-  // set limits for the vel and amps
-  odrv0.setLimits(MOVEMENT_SPEED, 15.0);
+  // Home the pendulum
+  if (homePendulum(left_lim, right_lim, center_pose, HOME_SPEED) != 0) {
+    fault = true;
+  }
 
   delayPump(100);
 }
