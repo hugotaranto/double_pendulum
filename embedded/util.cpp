@@ -44,6 +44,62 @@ void onCanFrame(uint32_t id, uint8_t len, const uint8_t *data) {
   }
 }
 
+void setupOdrive() {
+  
+  // Odrive setup
+  Serial.println("Starting ODriveCAN demo (ESP32 TWAI)");
+
+  // Register ODrive callbacks
+  odrv0.onFeedback(onFeedback, &odrv0_user_data);
+  odrv0.onStatus(onHeartbeat, &odrv0_user_data);
+
+  // Init CAN
+  if (!setupCan()) {
+    Serial.println("CAN failed to initialize: reset required");
+    while (true) { 
+      delay(50);
+    }
+  }
+
+  // Wait for ODrive heartbeat (pump events; add tiny yield)
+  Serial.println("Waiting for ODrive...");
+  while (!odrv0_user_data.received_heartbeat) {
+    pumpEvents(can_intf);
+    delay(1);
+  }
+  Serial.println("Found ODrive");
+
+  // Serial.println("Waiting for motor to boot properly");
+  // delay(5000);
+
+  // Request bus voltage/current (1s timeout)
+  Serial.println("Attempting to read bus voltage and current");
+  Get_Bus_Voltage_Current_msg_t vbus;
+  if (!odrv0.request(vbus, 1000)) {
+    Serial.println("vbus request failed!");
+    while (true) { delay(50); }
+  }
+  Serial.print("DC voltage [V]: "); Serial.println(vbus.Bus_Voltage);
+  Serial.print("DC current [A]: "); Serial.println(vbus.Bus_Current);
+
+
+  // Enter CLOSED_LOOP_CONTROL with periodic event pumping (mirrors official flow)
+  Serial.println("Enabling CLOSED_LOOP_CONTROL...");
+  while (odrv0_user_data.last_heartbeat.Axis_State != ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
+    odrv0.clearErrors();
+    delay(1);
+    odrv0.setState(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+
+    // Pump events for ~150ms to ensure reliable state transition even on busy bus
+    for (int i = 0; i < 15; ++i) {
+      delay(10);
+      pumpEvents(can_intf);
+    }
+  }
+
+  Serial.println("ODrive running!");
+}
+
 
 /* ---------------- Limit Switches ---------------- */
 
@@ -84,6 +140,22 @@ void waitForPose(double pose, int timeout) {
 
   // wait for the pose to fully complete
   delayPump(20);
+}
+
+int waitForFeedback(unsigned long timeout) {
+
+  unsigned long start = micros();
+
+  while (!odrv0_user_data.received_feedback) {
+    pumpEvents(can_intf);
+
+    if (micros() - start > timeout) {
+      Serial.println("ODRIVE FEEDBACK TIMOUT");
+      return -1;
+    }
+  }
+
+  return 0;
 }
 
 
@@ -139,5 +211,33 @@ void movementTest(double center_pose, double left_lim, double right_lim) {
   waitForPose(right_lim);
   delayPump(1000);
 
+}
+
+
+/* ----------------- Button logic ----------------- */
+
+void updateButton(Button &button) {
+
+  bool raw_state = digitalRead(button.pin);
+
+  // Raw state changed -> restart debounce timer
+  if (raw_state != button.last_raw_state) {
+    button.last_change_time = millis();
+    button.last_raw_state = raw_state;
+  }
+
+  // Has the new state remained stable long enough?
+  if ((millis() - button.last_change_time) >= DEBOUNCE_MS) {
+
+    // Stable state has changed
+    if (raw_state != button.stable_state) {
+      button.stable_state = raw_state;
+
+      // LOW -> HIGH = button pressed
+      if (button.stable_state == HIGH) {
+        button.pressed = true;
+      }
+    }
+  }
 }
 

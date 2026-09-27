@@ -19,6 +19,8 @@
 #define LIM_SWITCH_L    17
 #define LIM_SWITCH_R    18
 
+// button debounce time
+#define DEBOUNCE_MS     30
 
 /* ----------------- CAN interface ---------------- */
 
@@ -43,6 +45,7 @@ void onHeartbeat(Heartbeat_msg_t &msg, void *user_data);
 void onFeedback(Get_Encoder_Estimates_msg_t &msg, void *user_data);
 void onCanFrame(uint32_t id, uint8_t len, const uint8_t *data);
 
+void setupOdrive();
 
 /* ---------------- Limit Switches ---------------- */
 
@@ -56,11 +59,27 @@ void IRAM_ATTR leftLimitISR();
 
 void delayPump(int time_ms);
 void waitForPose(double pose, int timeout=10000);
-
+int waitForFeedback(unsigned long timeout=1000);
 
 /* ------------------ Debugging ------------------- */
 void debug_log(const char *msg);
 void debug_state(const char *msg);
 void movementTest(double center_pose, double left_lim, double right_lim);
+
+/* ----------------- Button logic ----------------- */
+
+struct Button {
+  uint8_t pin;
+
+  bool stable_state = HIGH;
+  bool last_raw_state = HIGH;
+
+  unsigned long last_change_time = 0;
+
+  bool pressed = false;
+};
+
+
+void updateButton(Button &button);
 
 #endif
