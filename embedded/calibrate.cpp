@@ -1,4 +1,5 @@
-#include "homing.h"
+#include "calibrate.h"
+#include "AS5048A.h"
 
 int homePendulum(double &left_lim, double &right_lim, double &center_pose, float home_speed) {
 
@@ -45,6 +46,21 @@ int homePendulum(double &left_lim, double &right_lim, double &center_pose, float
   Serial.println(center_pose, 6);
   Serial.println("Homing Sequence Done!");
 
+  // go back to center:
+  odrv0.setControllerMode(
+      ODriveControlMode::CONTROL_MODE_POSITION_CONTROL,
+      ODriveInputMode::INPUT_MODE_PASSTHROUGH
+  );
+  delayPump(20);
+
+  odrv0.setPosition(center_pose);
+  if (waitForPose(center_pose)) {
+    Serial.println("Failed Centering!");
+    return -1;
+  }
+
+  Serial.println("At center");
+
   return 0;
 }
 
@@ -83,12 +99,11 @@ int homeAxis(float home_speed, double &pose) {
       return -1;
     }
 
-    if (abs(iq_msg.Iq_Measured) > 1.0) {
+    if (abs(iq_msg.Iq_Measured) > 5.0) {
       Serial.println("Current too high while homing. Is motor obstructed?");
       odrv0.setVelocity(0);
       return -1;
     }
-    Serial.println("Waiting...");
 
     if (delayPump(2)) {
       break;
@@ -548,5 +563,63 @@ void kineticFrictionTest(const float start_torque, const float torque_step, int 
   delayPump(5);
 
   odrv0.setVelocity(0);
+}
+
+
+void pendulumDampingTest(AS5048A &encoder) {
+
+  while(1) {
+    signed long time = millis();
+    float val = encoder.getRotationInDegrees();
+
+    Serial.print("Time: "); Serial.print(time); 
+    Serial.print(" Angle: "); Serial.println(val);
+
+    delay(10);
+  }
+
+}
+
+int32_t zeroEncoder(AS5048A &encoder, int num_steps) {
+
+  const int32_t COUNTS_PER_REV = 16384;
+  const int32_t HALF_REV = COUNTS_PER_REV / 2;
+
+  int32_t previous = encoder.getRawRotation();
+  int64_t sum = previous;
+
+  for (int i = 1; i < num_steps; i++) {
+
+    int32_t current = encoder.getRawRotation();
+
+    int32_t diff = current - previous;
+
+    // Unwrap across the 0/16384 boundary
+    if (diff > HALF_REV) {
+      diff -= COUNTS_PER_REV;
+    }
+    else if (diff < -HALF_REV) {
+      diff += COUNTS_PER_REV;
+    }
+
+    int32_t unwrapped = previous + diff;
+
+    sum += unwrapped;
+    previous = unwrapped;
+
+    delay(1);
+  }
+
+  int32_t average = sum / num_steps;
+
+  // Wrap average back into [0, 16384)
+  average %= COUNTS_PER_REV;
+
+  if (average < 0) {
+    average += COUNTS_PER_REV;
+  }
+
+  // encoder.setZeroPosition((uint16_t)average);
+  return average;
 }
 

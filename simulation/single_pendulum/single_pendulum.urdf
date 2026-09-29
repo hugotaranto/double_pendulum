@@ -5,7 +5,7 @@
   <link name="slider">
     <inertial>
       <origin xyz="0 0 0" />
-      <mass value="0.5"/>
+      <mass value="0.03"/>
       <inertia
         ixx="0"
         ixy="0"
@@ -34,7 +34,7 @@
     <child link="slider" />
 
     <!-- Slider moves along X -->
-    <axis xyz="1 0 0" />
+    <axis xyz="-1 0 0" />
 
     <limit
       lower="0.0"
@@ -110,7 +110,7 @@
     <child link="arm"/>
 
     <!-- Rotation axis is the bearing shaft -->
-    <axis xyz="0 1 0"/>
+    <axis xyz="0 -1 0"/>
   </joint>
 
 

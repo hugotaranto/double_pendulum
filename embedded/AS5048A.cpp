@@ -365,7 +365,7 @@ void AS5048A::setDelay()
 {
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
 	// this->esp32_delay = 50;
-  this->esp32_delay = 2;
+  this->esp32_delay = 0;
 	if (this->debug)
 	{
 		Serial.println("AS5048A working with ESP32");

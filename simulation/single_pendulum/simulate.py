@@ -1,5 +1,4 @@
 import numpy as np
-
 import pydrake.symbolic as sym
 from pydrake.all import (
     AddMultibodyPlantSceneGraph,
@@ -19,6 +18,7 @@ Parser,
     MultibodyPlant,
     DirectTranscription,
     LeafSystem,
+    ExternallyAppliedSpatialForce,
 )
 
 import time
@@ -26,6 +26,12 @@ import sys
 import os
 import pickle
 from pathlib import Path
+
+
+equilibriums = {
+        "0" : [0, 0, 0, 0],
+        "1" : [0, np.pi, 0, 0]
+}
 
 class LQRController(LeafSystem):
     def __init__(self, lqr_gain, target_state):
@@ -47,25 +53,43 @@ class LQRController(LeafSystem):
         output.SetFromVector([u])
 
 
-# Find the absolute path to the root 'sliding_double_pendulum' directory
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+def get_plant(file="./sliding_double_pendulum.urdf"):
+    plant = MultibodyPlant(time_step=0.0)
+    Parser(plant).AddModels(file)
 
-# Define the specific directories that need to be searchable
-simulation_dir = os.path.join(project_root, 'simulation')
-double_pend_dir = os.path.join(simulation_dir, 'double_pendulum')
-single_pend_dir = os.path.dirname(os.path.abspath(__file__))
+    slider = plant.GetJointByName("slider_joint")
+    # slider.set_default_damping(4.59)
+    # slider.set_default_damping(100)
 
-# Inject them all at the front of Python's search path
-for path in [project_root, simulation_dir, double_pend_dir, single_pend_dir]:
-    if path not in sys.path:
-        sys.path.insert(0, path)
+    shoulder = plant.GetJointByName("shoulder")
+    shoulder.set_default_damping(2.54e-4)
 
-from double_pendulum.pendulum import get_plant, get_diagram
+    plant.Finalize()
 
-equilibriums = {
-        "0" : [0, 0, 0, 0],
-        "1" : [0, np.pi, 0, 0]
-}
+    return plant
+
+def get_diagram(file="./sliding_double_pendulum.urdf"):
+    builder = DiagramBuilder()
+
+    plant, scene_graph = AddMultibodyPlantSceneGraph(
+        builder,
+        time_step=0.0
+    )
+
+    parser = Parser(plant)
+    parser.AddModels(file)
+
+    # Experimentally measured viscous cart friction
+    # F = b * v
+    slider = plant.GetJointByName("slider_joint")
+    # slider.set_default_damping(4.59)
+
+    shoulder = plant.GetJointByName("shoulder")
+    shoulder.set_default_damping(2.54e-4)
+
+    plant.Finalize()
+
+    return plant, builder, scene_graph
 
 # state space is:
 #[cart pose, shoulder angle, cart vel, shoulder angular vel]
@@ -106,13 +130,13 @@ def get_single_lqr(plant, state, print_detail=False):
         print(eigvals)
 
     Q = np.diag([
-        20,     # slider position
-        100,    # angle of shoulder
-        1,      # slider velocity
+        35,     # slider position
+        50,     # angle of shoulder
+        5,     # slider velocity
         10      # shoulder angular velocity
     ])
 
-    R = np.array([[0.5]])
+    R = np.array([[0.1]])
 
     K, S = LinearQuadraticRegulator(
             linear_system.A(),
@@ -174,6 +198,8 @@ if __name__ == "__main__":
         gain = get_single_lqr(plant, equilibriums[state], print_detail=True)
 
         gains[state] = gain
+
+    print("\n\n\nGains:", gains)
 
     # simulate the system
     up_state = equilibriums["1"]
