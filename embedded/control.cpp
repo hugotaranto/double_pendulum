@@ -55,18 +55,26 @@ double PendulumController::iterate() {
 
   pumpEvents(can_intf);
 
+  bool debug = false;
+  this->iters += 1;
+  if (this->iters == 500) {
+    this->iters = 0;
+    debug = true;
+  }
+
   // get data from the magnetic encoder
-  getEncoderState();
+  getEncoderState(debug);
 
   // get data from odrive
   getOdrvState();
+
 
   // compute the force output
   return computeOutput();
 
 }
 
-void PendulumController::getEncoderState() {
+void PendulumController::getEncoderState(bool print) {
 
   unsigned long current_encoder_read_time = micros();
   uint16_t raw = encoder.getRawRotation();
@@ -120,6 +128,13 @@ void PendulumController::getEncoderState() {
   x[1] = x_est_pos;
   x[3] = x_est_vel;
 
+  if (print) {
+    Serial.printf("Zero: %f || Current: %f || Estimated: %f\n", 
+        this->zero_raw * (2.0f * M_PI / COUNTS_PER_REV), 
+        unwrapped_raw * (2.0f * M_PI / COUNTS_PER_REV),
+        x_est_pos);
+  }
+
 }
 
 void PendulumController::getOdrvState() {
@@ -129,9 +144,10 @@ void PendulumController::getOdrvState() {
     this->fault = true;    
   }
 
-  x[0] = (odrv0_user_data.last_feedback.Pos_Estimate - center_pose) * BELT_DISTANCE_PER_REV;
+  x[0] = (odrv0_user_data.last_feedback.Pos_Estimate * BELT_DISTANCE_PER_REV) - this->center_pose;
   x[2] = (odrv0_user_data.last_feedback.Vel_Estimate) * BELT_DISTANCE_PER_REV;
 
+  // Serial.printf("Cart Pose: %.5f\n", x[0]);
 }
 
 double PendulumController::computeOutput() {
@@ -147,11 +163,9 @@ double PendulumController::computeOutput() {
 
     // convert to motor torque
     double motor_torque = u * PULLEY_PITCH_RADIUS * TORQUE_SCALE_FACTOR;
-    if (motor_torque > 0) {
-      motor_torque += TORQUE_CONSTANT_ADD;
-    } else if (motor_torque < 0) {
-      motor_torque -= TORQUE_CONSTANT_ADD;
-    }
+
+    double friction_comp = TORQUE_CONSTANT_ADD * tanh(motor_torque / FRICTION_SMOOTHING);
+    motor_torque += friction_comp;
 
     // Safety saturation
     double capped_torque = constrain(
@@ -161,8 +175,13 @@ double PendulumController::computeOutput() {
     );
 
     if (capped_torque != motor_torque) {
-      // Serial.println("Torque capped from: ");
       Serial.printf("Torque capped from: %f\n", motor_torque);
+      Serial.printf(
+          "x: %.5f %.5f %.5f %.5f | target: %.5f %.5f %.5f %.5f\n",
+          x[0], x[1], x[2], x[3],
+          target_state[0], target_state[1],
+          target_state[2], target_state[3]
+      );
     }
 
     return capped_torque;
@@ -199,5 +218,24 @@ void PendulumController::setInput(double input) {
   } else if (this->mode == Mode::VELOCITY) {
     odrv0.setVelocity(input);
   }
+
+}
+
+
+int PendulumController::getCartPose(double &cart_pose) {
+  pumpEvents(can_intf);
+
+  odrv0_user_data.received_feedback = false;
+  // request feedback
+  odrv0.getFeedback(odrv0_user_data.last_feedback, 0);
+
+  if (waitForFeedback(1000)) {
+    this->fault = true;
+    return -1;
+  }
+
+  cart_pose = odrv0_user_data.last_feedback.Pos_Estimate * BELT_DISTANCE_PER_REV;
+
+  return 0;
 
 }

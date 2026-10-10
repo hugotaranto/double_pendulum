@@ -20,6 +20,7 @@ const double BELT_DISTANCE_PER_REV = 0.040;
 
 const double TORQUE_SCALE_FACTOR = 1.2;
 const double TORQUE_CONSTANT_ADD = 0.2;
+const double FRICTION_SMOOTHING = 0.02;
 
 
 class PendulumController {
@@ -46,10 +47,13 @@ class PendulumController {
 
     void setInput(double input);
 
+    // get the cart position
+    int getCartPose(double &cart_pose);
+
 
   private:
 
-    void getEncoderState();
+    void getEncoderState(bool print=false);
     void getOdrvState();
 
     double computeOutput();
@@ -79,6 +83,8 @@ class PendulumController {
     double target_state[4];
 
     double x[4];
+
+    long iters = 0;
 
 };
 

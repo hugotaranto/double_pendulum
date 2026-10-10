@@ -38,9 +38,9 @@ const double target_state[4] = {
 // xdrive constraints
 const float HOME_SPEED = 4.0f;
 // const float MOVEMENT_SPEED = 15.0f;
-const double MAX_TORQUE = 2.0;
+const double MAX_TORQUE = 3.0;
 const double MAX_CURRENT = 15;
-const double MAX_VELOCITY = 15;
+const double MAX_VELOCITY = 20;
 
 /* -------------- Controller -------------- */
 PendulumController::Mode mode = PendulumController::Mode::FORCE;
@@ -93,47 +93,61 @@ void setup() {
   encoder.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
 
   // zero the encoder
-  float zero_raw = zeroEncoder(encoder, 10);
-  float last_raw = encoder.getRawRotation();
-  float unwrapped_raw = last_raw;
+  int16_t zero_raw = zeroEncoder(encoder, 10);
+  // float last_raw = encoder.getRawRotation();
+  int16_t last_raw = encoder.getRawRotation();
+  int16_t unwrapped_raw = last_raw;
 
   // setup the odrive
   setupOdrive();
   odrv0.setLimits(MAX_VELOCITY, MAX_TORQUE);
   // odrv0.setLimits(MAX_VELOCITY, MAX_CURRENT);
   // odrv0.setLimits(float velocity_limit, float current_soft_max)
+  delayPump(500);
 
   // get odrv feedback
-  odrv0_user_data.received_feedback = false;
-  odrv0.getFeedback(odrv0_user_data.last_feedback, 0);
+  if (controller.getCartPose(center_pose)) {
+    Serial.println("Failed comms getting center pose");
+  }
 
-  waitForFeedback(1000);
-  center_pose = odrv0_user_data.last_feedback.Pos_Estimate;
-
-  Serial.print("Center Pose: "); Serial.println(center_pose);
+  Serial.printf("Center Pose: %f\n", center_pose);
+  Serial.printf("Shoulder Zero: %f\n", zero_raw * (2.0f * M_PI / COUNTS_PER_REV));
 
   // calibrate the controller
-  controller.calibrate(center_pose, zero_raw, last_raw, unwrapped_raw);
+  // controller.calibrate(center_pose, zero_raw, last_raw, unwrapped_raw);
 
   // wait for button press
   Serial.println("Waiting for button press");
   while(!left_limit_hit && !right_limit_hit) {
-    float val = encoder.getRotationInRadians();
+    // float val = encoder.getRotationInRadians();
+    int16_t raw = encoder.getRawRotation();
+    float val = raw * (2.0f * M_PI / COUNTS_PER_REV);
 
-    odrv0_user_data.received_feedback = false;
-    odrv0.getFeedback(odrv0_user_data.last_feedback, 0);
-    if (waitForFeedback(1000)) {
+    double cart_pose;
+    if (controller.getCartPose(cart_pose)) {
       Serial.println("Failed comms");
     }
 
-    Serial.printf("Encoder Val: %f || Cart Pose: %f\n", val, odrv0_user_data.last_feedback.Pos_Estimate);
+    Serial.printf("Encoder Val: %f || Cart Pose: %f\n", val, cart_pose);
     delay(500);
   }
+
+  last_raw = encoder.getRawRotation();
+  if (last_raw < zero_raw) {
+    last_raw += COUNTS_PER_REV;
+  }
+
+  Serial.printf("Zero Raw: %d || Last Raw: %d");
+
+  unwrapped_raw = last_raw;
+
+  controller.calibrate(center_pose, zero_raw, last_raw, unwrapped_raw);
 
   delayPump(2000, false);
 
   left_limit_hit = false;
   right_limit_hit = false;
+
 
 
   Serial.println("Entering loop");
